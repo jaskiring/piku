@@ -6,9 +6,9 @@ import { ACTIVE_BRAIN }       from '../../../services/OllamaService'
 // (which model/provider is answering). The brain becomes dynamic with the
 // ProviderRegistry (Sprint 2.5-P: local Ollama vs Claude-CLI escalation).
 const PRESENCE: Record<PresenceState, { label: string; dot: string }> = {
-  idle:      { label: 'idle',      dot: 'bg-blue-400/40' },
-  listening: { label: 'listening', dot: 'bg-blue-400/80' },
-  thinking:  { label: 'thinking…', dot: 'bg-blue-400/70 animate-pulse' },
+  idle:      { label: 'idle',      dot: 'bg-cyan-400/40' },
+  listening: { label: 'listening', dot: 'bg-cyan-400/80' },
+  thinking:  { label: 'thinking…', dot: 'bg-cyan-400/70 animate-pulse' },
 }
 
 export function StatusBar({ presenceState }: { presenceState: PresenceState }) {
@@ -25,7 +25,7 @@ export function StatusBar({ presenceState }: { presenceState: PresenceState }) {
         <span className="text-white/20">brain</span>
         <span className="text-white/45">{ACTIVE_BRAIN.model}</span>
         <span className="text-white/15">·</span>
-        <span className="text-blue-300/45">{ACTIVE_BRAIN.where}</span>
+        <span className="text-cyan-300/45">{ACTIVE_BRAIN.where}</span>
       </span>
     </div>
   )

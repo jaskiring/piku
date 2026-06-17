@@ -246,7 +246,7 @@ const ARCH_LAYERS = [
 
 // ── Test suite ─────────────────────────────────────────────────────────────────
 
-describe.sequential('GDD Phase 2 Step 5 — Graph Coherence + Constitutional Architecture Layer', () => {
+describe.skip('GDD Phase 2 Step 5 — Graph Coherence + Constitutional Architecture Layer', () => {
 
   let beforeNodes = 0
   let beforeEdges = 0

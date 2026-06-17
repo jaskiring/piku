@@ -1,7 +1,7 @@
 import { logger }                  from '../../lib/logger'
 import type {
   GraphNode, GraphEdge, GraphNodeType, GraphRelationship,
-  ProjectRisk, NextBestAction,
+  ProjectRisk, NextBestAction, Galaxy,
 } from './types'
 import { GraphStore }              from './GraphStore'
 import { GraphExtractionService, CONFIRM_THRESHOLD } from './GraphExtractionService'
@@ -328,6 +328,97 @@ export class GraphService {
     } catch { /* non-critical */ }
 
     return sections.join('\n\n')
+  }
+
+  // ── Galaxy clustering ──────────────────────────────────────────────────────
+  // Groups nodes into galaxies: core (Piku, user), per-project subgraphs, and
+  // a brainstorm galaxy for unassigned extraction output.
+
+  async getGalaxies(): Promise<Galaxy[]> {
+    const allNodes = await this.store.getAllNodes()
+    const allEdges = await this.store.getAllEdges()
+    const confirmed = allEdges.filter(e => e.status === 'confirmed')
+    const galaxies: Galaxy[] = []
+
+    // 1) Core galaxy — Piku + user person node + core concepts
+    const coreNames = new Set(['piku', 'jaskirat', 'jas'])
+    const coreNodes = allNodes.filter(n => coreNames.has(n.name.toLowerCase()))
+    const coreIds   = new Set(coreNodes.map(n => n.id))
+    const coreEdges = confirmed.filter(e => coreIds.has(e.fromId) || coreIds.has(e.toId))
+    if (coreNodes.length > 0) {
+      galaxies.push({ id: 'galaxy-core', kind: 'core', name: 'Core', nodes: coreNodes, edges: coreEdges })
+    }
+
+    // 2) Project galaxies — group by metadata.projectId or part_of edges
+    const assignedIds = new Set<string>(coreIds)
+    const projectIds  = new Set<string>()
+    for (const n of allNodes) {
+      const pid = n.metadata?.projectId as string | undefined
+      if (pid) projectIds.add(pid)
+    }
+
+    for (const pid of projectIds) {
+      const projectNode = allNodes.find(n => n.id === pid || n.metadata?.projectId === pid)
+      const pName = projectNode?.name ?? pid.slice(0, 8)
+      const pNodes = allNodes.filter(n => {
+        if (n.id === pid) return true
+        if ((n.metadata?.projectId as string) === pid) return true
+        // Also include nodes linked via part_of to this project
+        const partOfEdge = confirmed.find(e =>
+          (e.fromId === n.id || e.toId === n.id) &&
+          e.relationship === 'part_of' &&
+          (e.fromId === pid || e.toId === pid)
+        )
+        return !!partOfEdge
+      })
+      for (const n of pNodes) assignedIds.add(n.id)
+      const pEdgeIds = new Set(confirmed.filter(e =>
+        pNodes.some(n => n.id === e.fromId) && pNodes.some(n => n.id === e.toId)
+      ).map(e => e.id))
+      const pEdges = confirmed.filter(e => pEdgeIds.has(e.id))
+      galaxies.push({ id: `galaxy-${pid}`, kind: 'project', name: pName, nodes: pNodes, edges: pEdges, projectId: pid })
+    }
+
+    // 3) Brainstorm galaxy — everything unassigned
+    const leftover = allNodes.filter(n => !assignedIds.has(n.id))
+    if (leftover.length > 0) {
+      const leftIds = new Set(leftover.map(n => n.id))
+      const leftEdges = confirmed.filter(e => leftIds.has(e.fromId) && leftIds.has(e.toId))
+      galaxies.push({ id: 'galaxy-brainstorm', kind: 'brainstorm', name: 'Brainstorms', nodes: leftover, edges: leftEdges })
+    }
+
+    return galaxies
+  }
+
+  async getProjectSubgraph(projectId: string): Promise<{ nodes: GraphNode[]; edges: GraphEdge[] } | null> {
+    const allNodes = await this.store.getAllNodes()
+    const allEdges = await this.store.getAllEdges()
+    const confirmed = allEdges.filter(e => e.status === 'confirmed')
+
+    // Find the project node
+    const projectNode = allNodes.find(n =>
+      n.id === projectId || (n.metadata?.projectId as string) === projectId
+    )
+    if (!projectNode) return null
+
+    // Collect nodes: the project + anything linked via part_of or matching projectId
+    const nodeIds = new Set<string>([projectNode.id])
+    for (const n of allNodes) {
+      if ((n.metadata?.projectId as string) === projectId) nodeIds.add(n.id)
+      const partOf = confirmed.find(e =>
+        (e.fromId === n.id || e.toId === n.id) &&
+        e.relationship === 'part_of'
+      )
+      if (partOf) { nodeIds.add(n.id); nodeIds.add(partOf.fromId === n.id ? partOf.toId : partOf.fromId) }
+    }
+
+    const nodes = allNodes.filter(n => nodeIds.has(n.id))
+    const edgeIds = new Set(confirmed.filter(e =>
+      nodeIds.has(e.fromId) && nodeIds.has(e.toId)
+    ).map(e => e.id))
+    const edges = confirmed.filter(e => edgeIds.has(e.id))
+
+    return { nodes, edges }
   }
 
   // ── Post-conversation processing ───────────────────────────────────────────

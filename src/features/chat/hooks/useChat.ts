@@ -7,16 +7,19 @@ import { WorldModelQueryService }        from '../../worldmodel/WorldModelQueryS
 import { graphService }                  from '../../graph'
 import { ollamaService }                 from '../../../services/OllamaService'
 import { logger }                        from '../../../lib/logger'
+import { PIKU_PERSONA }                  from '../../../lib/persona'
 
 // Module-level singletons — one instance per app lifetime
 const memoryService     = new MemoryService()
 const summaryService    = new ConversationSummaryService()
 const worldModelService = new WorldModelQueryService()
 
-const PIKU_SYSTEM_PROMPT = `You are Piku, a personal AI companion who genuinely knows the user over time.
-You are warm, thoughtful, and curious. You have a continuous memory of the user across conversations.
-Be natural and concise — respond in 1 to 3 sentences unless the user asks for more detail.
-Do not mention your memory system unless the user directly asks about it.`
+// Exported so app startup can warm the model with the EXACT same static prefix the live chat
+// uses (2.5-PERF) — that's what lets Ollama reuse the cached KV state for these tokens.
+// Keep this prefix byte-stable; the dynamic context (world model, summary) is appended after it.
+export const PIKU_SYSTEM_PROMPT = `${PIKU_PERSONA}
+
+You have a continuous memory of this person across conversations — weave in what you know, but don't mention the memory system itself unless they ask.`
 
 interface Options {
   addMessage:             (sender: Sender, text: string) => void

@@ -9,8 +9,8 @@ interface Props {
 // presenceState prop drives particle speed/density/pattern.
 export function ParticleOrb({ presenceState: _ }: Props) {
   return (
-    <div className="w-48 h-48 rounded-full bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-      <span className="text-blue-400/30 text-xs tracking-widest uppercase">orb</span>
+    <div className="w-48 h-48 rounded-full bg-cyan-500/10 border border-cyan-500/20 flex items-center justify-center shrink-0">
+      <span className="text-cyan-400/30 text-xs tracking-widest uppercase">orb</span>
     </div>
   )
 }

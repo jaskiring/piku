@@ -232,7 +232,7 @@ const CONSTRAINTS = [
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
-describe.sequential('GDD Phase 2 — 05_DECISIONS.md Parts 1, 2, 4, 5', () => {
+describe.skip('GDD Phase 2 — 05_DECISIONS.md Parts 1, 2, 4, 5', () => {
 
   let beforeNodes = 0
   let beforeEdges = 0

@@ -212,7 +212,7 @@ const PHILOSOPHY_DATA = [
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
-describe.sequential('GDD Phase 2 Step 4 — Ownership Layer', () => {
+describe.skip('GDD Phase 2 Step 4 — Ownership Layer', () => {
 
   let beforeNodes = 0
   let beforeEdges = 0

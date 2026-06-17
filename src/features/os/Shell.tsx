@@ -1,18 +1,22 @@
-import { useState } from 'react'
-import type { Message, PresenceState } from '../../types'
+import { useCallback, useEffect, useRef, useState } from 'react'
+import { AnimatePresence }                     from 'framer-motion'
 import { useAppState }                        from '../../hooks/useAppState'
 import { useChat, useConversationPersistence } from '../chat'
+import { PIKU_SYSTEM_PROMPT }                 from '../chat/hooks/useChat'
+import { ollamaService }                      from '../../services/OllamaService'
+import { voiceService }                       from '../../services/VoiceService'
 import { usePresenceCycle }                   from '../orb'
 import { Sidebar, type NavKey }               from './Sidebar'
 import { Dock }                               from './Dock'
-import { Dashboard }                          from './Dashboard'
-import { NeuralBackground }                   from '../overlay/components/NeuralBackground'
+import { HomeOS }                             from './HomeOS'
+import { CyberBackground }                    from './CyberBackground'
 import { GraphCanvas }                        from '../graph/components/GraphCanvas'
-import { ChatHistory }                        from '../chat/components/ChatHistory'
-import { ChatInput }                          from '../chat/components/ChatInput'
+import { SCREENS }                            from './screens/Screens'
+import { ImmersiveChat }                      from '../chat/components/ImmersiveChat'
+import { seedAccounts }                       from '../../services/accounts/init'
 
-// The Piku OS shell: sidebar + view + dock over a neural field, with a chat
-// slide-over the "Ask piku" bar opens. The graph lives in the Knowledge view.
+// The Piku OS shell: sidebar + view + dock over a neural field. The "Ask piku" bar opens an
+// immersive full-screen conversation (ImmersiveChat). The graph lives in the Knowledge view.
 export function Shell() {
   const {
     presenceState, setPresenceState,
@@ -28,49 +32,114 @@ export function Shell() {
   usePresenceCycle(setPresenceState, isSending)
 
   const [view, setView] = useState<NavKey>('home')
+  const [focusGalaxyId, setFocusGalaxyId] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
+
+  const navigateToGalaxy = useCallback((projectName: string) => {
+    setFocusGalaxyId(projectName.toLowerCase())
+    setView('knowledge')
+  }, [])
+
+  // 2.5-PERF — prime Ollama on launch (load the model + warm the KV cache for the static
+  // system prefix) so the user's first message isn't a cold ~multi-second first token.
+  useEffect(() => {
+    void (async () => {
+      if (await ollamaService.ensureReachable(8_000)) {
+        void ollamaService.warmup(PIKU_SYSTEM_PROMPT)
+        void ollamaService.warmupEmbed()
+      }
+    })()
+    void seedAccounts()
+  }, [])
+
+  const [voiceOn, setVoiceOn]     = useState(true)   // Piku speaks replies by default
+  const [listening, setListening] = useState(false)
+  const [speaking, setSpeaking]   = useState(false)
+  const stopListenRef = useRef<(() => void) | null>(null)
+  const prevSending   = useRef(false)
+
+  // 2.5-Voice — speak Piku's reply aloud once a response finishes (when voice is on).
+  useEffect(() => {
+    if (prevSending.current && !isSending && voiceOn) {
+      const last = chatHistory[chatHistory.length - 1]
+      if (last?.sender === 'piku' && last.text.trim()) {
+        voiceService.speak(last.text, { onStart: () => setSpeaking(true), onEnd: () => setSpeaking(false) })
+      }
+    }
+    prevSending.current = isSending
+  }, [isSending, voiceOn, chatHistory])
+
+  // Push-to-talk: mic → live transcript into the input → auto-send on final.
+  const toggleListening = () => {
+    if (listening) { stopListenRef.current?.(); setListening(false); setPresenceState('idle'); return }
+    if (!voiceService.sttSupported) return
+    voiceService.prime()
+    setListening(true)
+    setPresenceState('listening')
+    stopListenRef.current = voiceService.listen({
+      onResult: (t) => setInputText(t),
+      onFinal:  (t) => {
+        setListening(false)
+        const text = t.trim()
+        if (text) { setChatOpen(true); sendMessage(text) }
+        else setPresenceState('idle')
+      },
+    })
+  }
 
   const ask = () => {
     const t = inputText.trim()
     if (!t || isSending) return
+    voiceService.prime()   // unlock TTS within this user gesture
     setChatOpen(true)
     sendMessage(t)
   }
 
   return (
-    <div className="relative w-screen h-screen overflow-hidden bg-[#03060D] text-white flex antialiased">
-      <NeuralBackground />
-      <div className="absolute inset-0 bg-[radial-gradient(120%_90%_at_50%_0%,rgba(12,40,60,0.5),transparent_70%)] pointer-events-none" />
+    <div className="relative w-screen h-screen overflow-hidden bg-[#04060c] text-white flex antialiased">
+      <CyberBackground />
 
       <Sidebar view={view} onNavigate={setView} />
 
       <main className="relative flex-1 min-w-0 overflow-y-auto z-10">
         {view === 'home' && (
-          <Dashboard
+          <HomeOS
             inputText={inputText}
             onInputChange={setInputText}
             isSending={isSending}
             onAsk={ask}
             onNavigate={setView}
+            presence={presenceState}
           />
         )}
-        {view === 'knowledge' && <div className="absolute inset-0"><GraphCanvas /></div>}
-        {view !== 'home' && view !== 'knowledge' && <ComingSoon label={view} />}
+        {view === 'knowledge' && <div className="absolute inset-0"><GraphCanvas focusGalaxyId={focusGalaxyId} onFocusHandled={() => setFocusGalaxyId(null)} /></div>}
+        {view !== 'home' && view !== 'knowledge' && (() => {
+          const Screen = SCREENS[view] as React.FC<{ onNavigate?: (v: NavKey) => void; onNavigateToGalaxy?: (name: string) => void }> | undefined
+          return Screen ? <Screen onNavigate={setView} onNavigateToGalaxy={navigateToGalaxy} /> : <ComingSoon label={view} />
+        })()}
       </main>
 
       <Dock view={view} onNavigate={setView} />
 
-      {chatOpen && (
-        <ChatPanelOverlay
-          presence={presenceState}
-          messages={chatHistory}
-          inputText={inputText}
-          isSending={isSending}
-          onInputChange={setInputText}
-          onSend={ask}
-          onClose={() => setChatOpen(false)}
-        />
-      )}
+      <AnimatePresence>
+        {chatOpen && (
+          <ImmersiveChat
+            presence={presenceState}
+            messages={chatHistory}
+            inputText={inputText}
+            isSending={isSending}
+            onInputChange={setInputText}
+            onSend={ask}
+            onClose={() => setChatOpen(false)}
+            voiceOn={voiceOn}
+            onToggleVoice={() => setVoiceOn(v => { if (v) { voiceService.cancel(); setSpeaking(false) } else { voiceService.prime() } return !v })}
+            listening={listening}
+            onToggleListening={toggleListening}
+            sttSupported={voiceService.sttSupported}
+            speaking={speaking}
+          />
+        )}
+      </AnimatePresence>
     </div>
   )
 }
@@ -85,30 +154,3 @@ function ComingSoon({ label }: { label: string }) {
   )
 }
 
-function ChatPanelOverlay({ presence, messages, inputText, isSending, onInputChange, onSend, onClose }: {
-  presence:      PresenceState
-  messages:      Message[]
-  inputText:     string
-  isSending:     boolean
-  onInputChange: (t: string) => void
-  onSend:        () => void
-  onClose:       () => void
-}) {
-  return (
-    <div className="absolute top-0 right-0 bottom-0 w-[420px] z-40 bg-black/55 backdrop-blur-2xl border-l border-white/10 flex flex-col p-4 shadow-[-20px_0_60px_-20px_rgba(0,0,0,0.8)]">
-      <div className="flex items-center justify-between mb-3">
-        <span className="text-sm text-white/80 flex items-center gap-2">
-          <span className={`w-2 h-2 rounded-full ${presence === 'thinking' ? 'bg-cyan-300 animate-pulse' : 'bg-cyan-400'}`} />
-          Piku
-        </span>
-        <button onClick={onClose} className="text-white/30 hover:text-white/70 text-xs">✕</button>
-      </div>
-      <div className="flex-1 overflow-y-auto">
-        <ChatHistory messages={messages} />
-      </div>
-      <div className="mt-3 rounded-2xl bg-white/[0.05] border border-white/10 px-3 py-1.5">
-        <ChatInput value={inputText} isLoading={isSending} onChange={onInputChange} onSend={onSend} />
-      </div>
-    </div>
-  )
-}

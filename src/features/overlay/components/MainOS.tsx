@@ -22,9 +22,9 @@ interface Props {
 }
 
 const PRESENCE: Record<PresenceState, { dot: string; glow: string; pulse: boolean }> = {
-  idle:      { dot: 'bg-blue-400',  glow: 'shadow-[0_0_14px_3px_rgba(59,130,246,0.45)]', pulse: false },
-  listening: { dot: 'bg-sky-300',   glow: 'shadow-[0_0_18px_4px_rgba(125,211,252,0.6)]', pulse: false },
-  thinking:  { dot: 'bg-blue-300',  glow: 'shadow-[0_0_18px_4px_rgba(96,165,250,0.6)]',  pulse: true  },
+  idle:      { dot: 'bg-cyan-400',  glow: 'shadow-[0_0_14px_3px_rgba(34,211,238,0.45)]', pulse: false },
+  listening: { dot: 'bg-cyan-300',   glow: 'shadow-[0_0_18px_4px_rgba(125,211,252,0.6)]', pulse: false },
+  thinking:  { dot: 'bg-cyan-300',  glow: 'shadow-[0_0_18px_4px_rgba(56,189,248,0.6)]',  pulse: true  },
 }
 
 type PanelKey = 'projects' | 'vault' | 'sources' | 'memories'
@@ -78,7 +78,7 @@ export function MainOS({ presenceState, chatHistory, inputText, isSending, onInp
         <div className="absolute left-16 top-16 bottom-28 w-72 z-10 rounded-2xl bg-gradient-to-b from-white/[0.07] to-white/[0.02] backdrop-blur-2xl border border-white/10 ring-1 ring-inset ring-white/[0.04] p-4 shadow-[0_16px_60px_-12px_rgba(0,0,0,0.85)] flex flex-col">
           <div className="flex items-center justify-between mb-3">
             <span className="text-sm font-medium text-white/85 flex items-center gap-2">
-              <span className="text-blue-300/70">{active.glyph}</span>{active.label}
+              <span className="text-cyan-300/70">{active.glyph}</span>{active.label}
             </span>
             <button onClick={() => setPanel(null)} className="text-white/30 hover:text-white/70 text-xs leading-none">✕</button>
           </div>
@@ -116,7 +116,7 @@ export function MainOS({ presenceState, chatHistory, inputText, isSending, onInp
             <ChatHistory messages={chatHistory} />
           </div>
         )}
-        <div className="relative flex items-center gap-3 rounded-3xl bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl border border-white/12 ring-1 ring-inset ring-white/[0.05] pl-4 pr-3 py-2.5 shadow-[0_18px_70px_-14px_rgba(0,0,0,0.9),0_0_50px_-20px_rgba(59,130,246,0.5)]">
+        <div className="relative flex items-center gap-3 rounded-3xl bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl border border-white/12 ring-1 ring-inset ring-white/[0.05] pl-4 pr-3 py-2.5 shadow-[0_18px_70px_-14px_rgba(0,0,0,0.9),0_0_50px_-20px_rgba(34,211,238,0.5)]">
           <span className="absolute -top-px left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <span className="relative flex shrink-0 w-9 h-9 items-center justify-center">
             {p.pulse && <span className={`absolute w-9 h-9 rounded-full ${p.dot} opacity-20 animate-ping`} />}
@@ -144,7 +144,7 @@ function RailButton({ glyph, label, activeState, onClick }: { glyph: string; lab
         w-11 h-11 rounded-2xl flex items-center justify-center text-lg
         border backdrop-blur-md transition-all duration-200
         ${activeState
-          ? 'text-blue-200 border-blue-400/30 bg-blue-500/15 shadow-[0_0_20px_-4px_rgba(59,130,246,0.6)]'
+          ? 'text-cyan-200 border-cyan-400/30 bg-cyan-500/15 shadow-[0_0_20px_-4px_rgba(34,211,238,0.6)]'
           : 'text-white/35 hover:text-white/80 border-white/5 hover:border-white/12 bg-white/[0.02] hover:bg-white/[0.06]'}
       `}>
       {glyph}

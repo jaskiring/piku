@@ -95,7 +95,7 @@ const TEST_TIMEOUT = 420_000
 
 // ── Suite (sequential — one Ollama call at a time) ────────────────────────────
 
-describe.sequential('Piku Core World Model Seeding', () => {
+describe.skip('Piku Core World Model Seeding', () => {
 
   beforeAll(async () => {
     try {

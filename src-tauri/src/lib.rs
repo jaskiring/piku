@@ -1,5 +1,8 @@
 mod hotkey_manager;
 mod ipc;
+mod observer;
+mod os_tools;
+mod tts;
 mod tray_manager;
 mod window_manager;
 
@@ -11,6 +14,15 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             window_manager::show_overlay,
             window_manager::hide_overlay,
+            observer::active_window,
+            os_tools::open_app,
+            os_tools::open_path,
+            os_tools::open_in_app,
+            os_tools::list_dir,
+            os_tools::fetch_url,
+            os_tools::web_headlines,
+            tts::piper_speak,
+            tts::piper_available,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;

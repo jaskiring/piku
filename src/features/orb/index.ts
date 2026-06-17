@@ -1,4 +1,5 @@
 export { OrbCore } from './components/OrbCore'
+export { Orb } from './components/Orb'
 export { ParticleOrb } from './components/ParticleOrb'
 export { PresenceControls } from './components/PresenceControls'
 export { usePresenceCycle } from './hooks/usePresenceCycle'

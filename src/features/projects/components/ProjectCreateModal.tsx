@@ -100,7 +100,7 @@ export function ProjectCreateModal({ onCreated, onClose }: Props) {
         </label>
 
         {error && (
-          <p className="text-xs text-red-400/80">{error}</p>
+          <p className="text-xs text-cyan-400/80">{error}</p>
         )}
 
         <div className="flex gap-2 pt-1">

@@ -25,7 +25,7 @@ export function PresenceControls({ state, onChange }: Props) {
             'px-4 py-1.5 rounded-full text-[10px] tracking-[0.2em] uppercase',
             'border transition-all duration-300 cursor-pointer',
             state === key
-              ? 'bg-blue-500/15 text-blue-300/80 border-blue-500/30'
+              ? 'bg-cyan-500/15 text-cyan-300/80 border-cyan-500/30'
               : 'bg-transparent text-white/20 border-white/8 hover:text-white/40 hover:border-white/16',
           ].join(' ')}
         >

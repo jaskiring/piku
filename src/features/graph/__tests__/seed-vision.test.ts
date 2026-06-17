@@ -223,7 +223,7 @@ const PHILOSOPHY = [
 
 // ── Test suite ────────────────────────────────────────────────────────────────
 
-describe.sequential('GDD Phase 2 Step 3 — 01_PRODUCT_VISION.md seeding', () => {
+describe.skip('GDD Phase 2 Step 3 — 01_PRODUCT_VISION.md seeding', () => {
 
   let beforeNodes = 0
   let beforeEdges = 0

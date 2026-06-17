@@ -40,11 +40,11 @@ export function AmbientPopup() {
           </div>
         )}
 
-        <div className="relative flex items-center gap-3 rounded-3xl bg-gradient-to-b from-white/[0.09] to-white/[0.03] backdrop-blur-2xl border border-white/12 ring-1 ring-inset ring-white/[0.05] pl-4 pr-3 py-2.5 shadow-[0_18px_70px_-14px_rgba(0,0,0,0.92),0_0_50px_-18px_rgba(59,130,246,0.55)]">
+        <div className="relative flex items-center gap-3 rounded-3xl bg-gradient-to-b from-white/[0.09] to-white/[0.03] backdrop-blur-2xl border border-white/12 ring-1 ring-inset ring-white/[0.05] pl-4 pr-3 py-2.5 shadow-[0_18px_70px_-14px_rgba(0,0,0,0.92),0_0_50px_-18px_rgba(34,211,238,0.55)]">
           <span className="absolute -top-px left-8 right-8 h-px bg-gradient-to-r from-transparent via-white/20 to-transparent" />
           <span className="relative flex shrink-0 w-9 h-9 items-center justify-center">
-            <span className="absolute w-6 h-6 rounded-full bg-blue-400 opacity-15 blur-md" />
-            <span className="w-3 h-3 rounded-full bg-blue-400 shadow-[0_0_16px_3px_rgba(59,130,246,0.55)]" />
+            <span className="absolute w-6 h-6 rounded-full bg-cyan-400 opacity-15 blur-md" />
+            <span className="w-3 h-3 rounded-full bg-cyan-400 shadow-[0_0_16px_3px_rgba(34,211,238,0.55)]" />
           </span>
           <div className="flex-1">
             <ChatInput value={text} isLoading={false} onChange={setText} onSend={onSend} />

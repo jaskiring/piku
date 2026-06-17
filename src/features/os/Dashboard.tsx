@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react'
 import { Card } from './Card'
 import type { NavKey } from './Sidebar'
-import { NeuralBackground } from '../overlay/components/NeuralBackground'
+import type { PresenceState } from '../../types'
+import { Orb } from '../orb'
 import { projectService } from '../projects/components/ProjectDashboard'
+import { graphService } from '../graph'
+import { ollamaService, ACTIVE_BRAIN } from '../../services/OllamaService'
 
 interface Props {
   inputText:     string
@@ -10,39 +13,8 @@ interface Props {
   isSending:     boolean
   onAsk:         () => void
   onNavigate:    (k: NavKey) => void
+  presence:      PresenceState
 }
-
-const MODELS = [
-  { name: 'Nova 1.3',      kind: 'LLM · 70B params',       status: 'Running' },
-  { name: 'Visionix',      kind: 'Vision · 8B params',     status: 'Idle' },
-  { name: 'Embedder Pro',  kind: 'Embedding · 1.3B params', status: 'Idle' },
-  { name: 'Piku Reranker', kind: 'Ranker · 335M params',   status: 'Running' },
-]
-const ACTIVITY = [
-  { t: 'Model trained',       s: 'Nova 1.3',           ago: '2m ago' },
-  { t: 'Dataset uploaded',    s: 'product_data_v2.csv', ago: '15m ago' },
-  { t: 'Project updated',     s: 'Piku OS Core',       ago: '1h ago' },
-  { t: 'Inference completed', s: 'Visionix',           ago: '2h ago' },
-]
-const TASKS = [
-  { t: 'Training Nova 1.3',       p: 68 },
-  { t: 'Fine-tuning Visionix',    p: 42 },
-  { t: 'Indexing knowledge base', p: 91 },
-  { t: 'Evaluating Piku Reranker', p: 27 },
-]
-const STATUS = [
-  { t: 'Core Systems', v: 'Online' },
-  { t: 'AI Services',  v: 'Online' },
-  { t: 'Data Layer',   v: 'Healthy' },
-  { t: 'Vector DB',    v: 'Online' },
-]
-const QUICK = ['New Model', 'New Project', 'Upload Dataset', 'Create Note', 'Run Inference', 'Open Playground']
-const MOCK_PROJECTS = [
-  { name: 'Piku OS Core',          state: 'In Progress' },
-  { name: 'Personal AI Assistant', state: 'In Progress' },
-  { name: 'Research Copilot',      state: 'Planning' },
-  { name: 'DataSynth Engine',      state: 'In Progress' },
-]
 
 function greeting(): string {
   const h = new Date().getHours()
@@ -53,35 +25,39 @@ function dateline(): string {
   return `${d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })} · ${d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })}`
 }
 
-export function Dashboard({ inputText, onInputChange, isSending, onAsk, onNavigate }: Props) {
-  const [projects, setProjects] = useState(MOCK_PROJECTS)
+interface Project { name: string; state: string }
+
+export function Dashboard({ inputText, onInputChange, isSending, onAsk, onNavigate, presence }: Props) {
+  const [projects, setProjects] = useState<Project[]>([])
+  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null)
+  const [nodeCount, setNodeCount] = useState<number | null>(null)
 
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
         const all = await projectService.getAllProjects()
-        if (!cancelled && all.length) {
-          setProjects(all.slice(0, 4).map(p => ({ name: p.name, state: p.currentState || 'Active' })))
-        }
-      } catch { /* keep mock */ }
+        if (!cancelled) setProjects(all.slice(0, 5).map(p => ({ name: p.name, state: p.currentState || 'Active' })))
+      } catch { /* leave empty */ }
+      try { const up = await ollamaService.isReachable(); if (!cancelled) setOllamaUp(up) } catch { if (!cancelled) setOllamaUp(false) }
+      try { const nodes = await graphService.getAllNodes(); if (!cancelled) setNodeCount(nodes.length) } catch { /* skip */ }
     })()
     return () => { cancelled = true }
   }, [])
 
   return (
-    <div className="px-8 py-7 pb-28 max-w-[1500px] mx-auto">
+    <div className="px-8 py-7 pb-28 max-w-[1200px] mx-auto">
       {/* Greeting */}
       <div className="text-center mb-5">
         <div className="text-xs text-white/40 mb-2">{dateline()}</div>
         <h1 className="text-3xl font-semibold tracking-tight text-white/95">
           {greeting()}, Jaskirat <span className="text-cyan-300">✦</span>
         </h1>
-        <p className="text-white/45 mt-1">Let's build, ship and evolve.</p>
+        <p className="text-white/45 mt-1">Ask, or let me get something done.</p>
       </div>
 
       {/* Ask bar */}
-      <div className="max-w-3xl mx-auto mb-7">
+      <div className="max-w-2xl mx-auto mb-7">
         <div className="relative flex items-center gap-3 rounded-2xl bg-gradient-to-b from-white/[0.08] to-white/[0.02] backdrop-blur-2xl border border-white/12 ring-1 ring-inset ring-white/5 pl-4 pr-2.5 py-3 shadow-[0_18px_70px_-14px_rgba(0,0,0,0.9),0_0_60px_-22px_rgba(34,211,238,0.55)]">
           <span className="text-cyan-300 text-lg">✦</span>
           <input
@@ -96,166 +72,88 @@ export function Dashboard({ inputText, onInputChange, isSending, onAsk, onNaviga
         </div>
       </div>
 
-      {/* Card grid */}
+      {/* Real, useful surfaces only */}
       <div className="grid grid-cols-12 gap-4">
-        {/* Models */}
-        <Card title="Models" action={<span className="text-[11px] text-cyan-300/70 cursor-pointer">+ New Model</span>} className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-2.5">
-            {MODELS.map(m => (
-              <div key={m.name} className="flex items-center gap-2.5">
-                <span className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/70 text-xs shrink-0">◈</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-white/85 truncate">{m.name}</div>
-                  <div className="text-[10px] text-white/35 truncate">{m.kind}</div>
-                </div>
-                <span className={`text-[9px] px-1.5 py-0.5 rounded ${m.status === 'Running' ? 'text-emerald-300/80 bg-emerald-500/10' : 'text-white/40 bg-white/5'}`}>{m.status}</span>
-              </div>
-            ))}
-          </div>
-          <div className="text-[11px] text-cyan-300/60 mt-3 cursor-pointer">View all models →</div>
+        {/* Agent entry */}
+        <Card title="Agent" className="col-span-12 md:col-span-6">
+          <p className="text-xs text-white/50 mb-3">Talk to Piku and have it act on your Mac — open apps, files, and links.</p>
+          <button onClick={() => onNavigate('agent')}
+            className="text-[12px] text-cyan-200 bg-cyan-500/12 hover:bg-cyan-500/20 border border-cyan-400/25 rounded-xl px-3 py-1.5 transition-colors">Open Agent →</button>
         </Card>
 
-        {/* Neural Activity */}
-        <Card title="Neural Activity"
-          action={<span className="text-[10px] text-emerald-300/80 flex items-center gap-1"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />Live</span>}
-          className="col-span-12 lg:col-span-6">
-          <div className="relative h-40 rounded-xl overflow-hidden border border-white/5 mb-3 bg-[#040810]">
-            <NeuralBackground />
-          </div>
-          <div className="grid grid-cols-4 gap-2">
-            {[['Nodes', '24.6K'], ['Connections', '512K'], ['Tokens / s', '2.35M'], ['Inference ms', '38']].map(([k, v]) => (
-              <div key={k}>
-                <div className="text-[10px] text-white/35">{k}</div>
-                <div className="text-sm text-white/85">{v}</div>
-              </div>
-            ))}
+        {/* piku presence */}
+        <Card className="col-span-12 md:col-span-6">
+          <div className="flex items-center gap-4">
+            <Orb presence={presence} size={84} />
+            <div className="flex-1 min-w-0">
+              <div className="text-sm font-semibold text-white/85">piku</div>
+              <p className="text-xs text-white/45 mt-0.5">Local-first companion that remembers, and builds a private model of your world.</p>
+            </div>
           </div>
         </Card>
 
-        {/* Projects (real data) */}
-        <Card title="Projects" action={<span className="text-[11px] text-cyan-300/70 cursor-pointer">+ New</span>} className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-2.5">
-            {projects.map(p => (
-              <div key={p.name} className="flex items-center gap-2.5">
-                <span className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/70 text-xs shrink-0">▤</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-white/85 truncate">{p.name}</div>
-                  <div className="text-[10px] text-white/35 truncate">{p.state}</div>
+        {/* Projects (real) */}
+        <Card title="Projects" action={projects.length > 0 ? <button onClick={() => onNavigate('projects')} className="text-[11px] text-cyan-300/60">View all →</button> : undefined} className="col-span-12 md:col-span-6 lg:col-span-4">
+          {projects.length === 0 ? (
+            <div className="text-xs text-white/35 leading-relaxed">No projects yet — they appear here as Piku learns about your work.</div>
+          ) : (
+            <div className="flex flex-col gap-2.5">
+              {projects.map(p => (
+                <div key={p.name} className="flex items-center gap-2.5">
+                  <span className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/70 text-xs shrink-0">▤</span>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-xs text-white/85 truncate">{p.name}</div>
+                    <div className="text-[10px] text-white/35 truncate">{p.state}</div>
+                  </div>
                 </div>
-              </div>
-            ))}
-          </div>
-          <button onClick={() => onNavigate('projects')} className="text-[11px] text-cyan-300/60 mt-3">View all projects →</button>
+              ))}
+            </div>
+          )}
         </Card>
 
-        {/* Recent Activity */}
-        <Card title="Recent Activity" className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-2.5">
-            {ACTIVITY.map(a => (
-              <div key={a.t} className="flex items-center gap-2.5">
-                <span className="w-6 h-6 rounded-md bg-white/5 flex items-center justify-center text-white/40 text-[10px] shrink-0">▣</span>
-                <div className="flex-1 min-w-0">
-                  <div className="text-xs text-white/80 truncate">{a.t}</div>
-                  <div className="text-[10px] text-white/35 truncate">{a.s}</div>
-                </div>
-                <span className="text-[10px] text-white/30 shrink-0">{a.ago}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Active Tasks */}
-        <Card title="Active Tasks" className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-3 pt-1">
-            {TASKS.map(t => (
-              <div key={t.t}>
-                <div className="flex justify-between text-[11px] mb-1">
-                  <span className="text-white/70 truncate pr-2">{t.t}</span>
-                  <span className="text-white/40">{t.p}%</span>
-                </div>
-                <div className="h-1.5 rounded-full bg-white/8 overflow-hidden">
-                  <div className="h-full rounded-full bg-gradient-to-r from-cyan-400 to-sky-400" style={{ width: `${t.p}%` }} />
-                </div>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* Knowledge Graph (mini) */}
-        <Card title="Knowledge Graph" className="col-span-12 md:col-span-6 lg:col-span-3">
+        {/* Knowledge graph (real) */}
+        <Card title="World Model" action={<button onClick={() => onNavigate('knowledge')} className="text-[11px] text-cyan-300/60">Open →</button>} className="col-span-12 md:col-span-6 lg:col-span-4">
           <MiniGraph />
-          <button onClick={() => onNavigate('knowledge')} className="text-[11px] text-cyan-300/60 mt-1">Open Knowledge →</button>
+          <div className="text-[11px] text-white/40 mt-1">{nodeCount === null ? 'Loading…' : `${nodeCount} nodes in the graph`}</div>
         </Card>
 
-        {/* Quick Actions */}
-        <Card title="Quick Actions" className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-1.5">
-            {QUICK.map(q => (
-              <button key={q} className="flex items-center gap-2 text-xs text-white/60 hover:text-white/90 hover:bg-white/5 rounded-lg px-2.5 py-1.5 transition-colors text-left">
-                <span className="text-cyan-300/60">+</span>{q}
-              </button>
-            ))}
+        {/* Real system status */}
+        <Card title="System" className="col-span-12 lg:col-span-4">
+          <div className="flex flex-col gap-2.5 pt-0.5 text-xs">
+            <Row label="Ollama" value={ollamaUp === null ? 'checking…' : ollamaUp ? 'online' : 'offline'} ok={ollamaUp ?? undefined} />
+            <Row label="Chat model" value={`${ACTIVE_BRAIN.model} · ${ACTIVE_BRAIN.where}`} ok />
+            <Row label="Embeddings" value="nomic-embed-text" ok />
+            <Row label="World Model" value={nodeCount === null ? '…' : `${nodeCount} nodes`} ok />
           </div>
-        </Card>
-
-        {/* piku panel */}
-        <Card className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="text-sm font-semibold text-white/85 mb-1">piku</div>
-          <p className="text-xs text-white/45 mb-2">Your AI Operating System that thinks with you.</p>
-          <div className="flex items-center justify-center py-3">
-            <span className="relative flex w-20 h-20 items-center justify-center">
-              <span className="absolute w-20 h-20 rounded-full bg-cyan-400/10 blur-xl" />
-              <span className="absolute w-14 h-14 rounded-full border border-cyan-400/30" />
-              <span className="text-cyan-200 text-2xl drop-shadow-[0_0_14px_rgba(34,211,238,0.85)]">✦</span>
-            </span>
-          </div>
-        </Card>
-
-        {/* System Status */}
-        <Card title="System Status" className="col-span-12 md:col-span-6 lg:col-span-3">
-          <div className="flex flex-col gap-2.5 pt-0.5">
-            {STATUS.map(s => (
-              <div key={s.t} className="flex items-center justify-between text-xs">
-                <span className="text-white/55 flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{s.t}</span>
-                <span className="text-emerald-300/80">{s.v}</span>
-              </div>
-            ))}
-          </div>
-        </Card>
-
-        {/* System Terminal */}
-        <Card title="System Terminal" className="col-span-12 lg:col-span-6">
-          <pre className="text-[11px] leading-relaxed font-mono text-emerald-300/70 bg-black/40 rounded-xl p-3 border border-white/5 overflow-x-auto">{`piku@os:~$ status
-System: piku OS v1.0.0
-Uptime: 2h 14m   Models: 4 loaded   Projects: 7
-Active Users: 1
-GPU: 78%   Memory: 62%   Storage: 1.2TB / 2TB
-piku@os:~$ ▊`}</pre>
         </Card>
       </div>
     </div>
   )
 }
 
+function Row({ label, value, ok }: { label: string; value: string; ok?: boolean }) {
+  return (
+    <div className="flex items-center justify-between">
+      <span className="text-white/55 flex items-center gap-2">
+        <span className={`w-1.5 h-1.5 rounded-full ${ok === false ? 'bg-white/25' : 'bg-cyan-400'}`} />{label}
+      </span>
+      <span className={ok === false ? 'text-white/40' : 'text-cyan-300/80'}>{value}</span>
+    </div>
+  )
+}
+
 function MiniGraph() {
-  const hub = { x: 60, y: 65 }
+  const hub = { x: 60, y: 55 }
   const nodes = [
-    { x: 95, y: 40, label: 'Insights' },
-    { x: 28, y: 32, label: 'Datasets' },
-    { x: 22, y: 80, label: 'People' },
-    { x: 96, y: 95, label: 'APIs' },
-    { x: 52, y: 110, label: 'Files' },
+    { x: 95, y: 32 }, { x: 26, y: 28 }, { x: 20, y: 78 }, { x: 98, y: 86 }, { x: 54, y: 100 },
   ]
   return (
-    <svg viewBox="0 0 120 125" className="w-full h-28">
+    <svg viewBox="0 0 120 115" className="w-full h-24">
       {nodes.map((n, i) => (
         <line key={i} x1={hub.x} y1={hub.y} x2={n.x} y2={n.y} stroke="#22D3EE" strokeOpacity={0.28} strokeWidth={0.7} />
       ))}
       {nodes.map((n, i) => (
-        <g key={'n' + i}>
-          <circle cx={n.x} cy={n.y} r={3} fill="#7DD3FC" />
-          <text x={n.x} y={n.y - 5} fontSize={5} fill="#ffffff" fillOpacity={0.4} textAnchor="middle">{n.label}</text>
-        </g>
+        <circle key={'n' + i} cx={n.x} cy={n.y} r={3} fill="#7DD3FC" />
       ))}
       <circle cx={hub.x} cy={hub.y} r={7} fill="#22D3EE" opacity={0.25} />
       <circle cx={hub.x} cy={hub.y} r={4.5} fill="#22D3EE" />

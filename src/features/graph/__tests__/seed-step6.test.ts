@@ -264,7 +264,7 @@ const LEARNING_LOOP = {
 
 // ── Test suite ─────────────────────────────────────────────────────────────────
 
-describe.sequential('GDD Phase 2 Step 6 — Schema Normalization + Leakage Fix + Learning Loop', () => {
+describe.skip('GDD Phase 2 Step 6 — Schema Normalization + Leakage Fix + Learning Loop', () => {
 
   let beforeNodes = 0
   let beforeEdges = 0

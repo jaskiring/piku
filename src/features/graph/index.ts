@@ -8,6 +8,7 @@ export type {
   GraphRelationship,
   ProjectRisk,
   NextBestAction,
+  Galaxy,
 } from './types'
 
 import { GraphService } from './GraphService'

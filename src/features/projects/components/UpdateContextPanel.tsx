@@ -119,7 +119,7 @@ export function UpdateContextPanel({ project, onUpdated, onClose }: Props) {
               resize-none transition-colors
             "
           />
-          {error && <p className="text-[11px] text-red-400/80">{error}</p>}
+          {error && <p className="text-[11px] text-cyan-400/80">{error}</p>}
           <div className="flex gap-2">
             <button
               onClick={() => void extract()}
@@ -152,7 +152,7 @@ export function UpdateContextPanel({ project, onUpdated, onClose }: Props) {
       {(phase === 'review' || phase === 'applying') && diff && (
         <>
           <DiffPreview diff={diff} />
-          {error && <p className="text-[11px] text-red-400/80">{error}</p>}
+          {error && <p className="text-[11px] text-cyan-400/80">{error}</p>}
           <div className="flex gap-2">
             <button
               onClick={() => void approve()}
@@ -248,7 +248,7 @@ function DiffPreview({ diff }: { diff: ReviewableDiff }) {
       {diff.newBlockers.length > 0 && (
         <DiffSection label="Blockers" color="amber">
           {diff.newBlockers.map((b, i) => (
-            <span key={i} className="text-amber-300/60">{b}</span>
+            <span key={i} className="text-cyan-300/60">{b}</span>
           ))}
         </DiffSection>
       )}
@@ -259,19 +259,19 @@ function DiffPreview({ diff }: { diff: ReviewableDiff }) {
 type Color = 'blue' | 'green' | 'emerald' | 'indigo' | 'amber'
 
 const dot: Record<Color, string> = {
-  blue:    'bg-blue-400/50',
+  blue:    'bg-cyan-400/50',
   green:   'bg-green-400/50',
-  emerald: 'bg-emerald-400/50',
+  emerald: 'bg-cyan-400/50',
   indigo:  'bg-indigo-400/50',
-  amber:   'bg-amber-400/50',
+  amber:   'bg-cyan-400/50',
 }
 
 const label: Record<Color, string> = {
-  blue:    'text-blue-300/60',
+  blue:    'text-cyan-300/60',
   green:   'text-green-300/60',
-  emerald: 'text-emerald-300/60',
+  emerald: 'text-cyan-300/60',
   indigo:  'text-indigo-300/60',
-  amber:   'text-amber-300/60',
+  amber:   'text-cyan-300/60',
 }
 
 function DiffSection({

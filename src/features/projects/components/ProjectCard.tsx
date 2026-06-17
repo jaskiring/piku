@@ -27,7 +27,7 @@ export function ProjectCard({ project, onUpdateContext }: Props) {
       {/* Status */}
       {project.currentState && (
         <div className="flex items-center gap-1.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-400/60 shrink-0" />
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/60 shrink-0" />
           <span className="text-xs text-white/60">{project.currentState}</span>
         </div>
       )}
@@ -47,9 +47,9 @@ export function ProjectCard({ project, onUpdateContext }: Props) {
       {/* Blockers */}
       {project.blockers.length > 0 && (
         <div className="flex flex-col gap-0.5">
-          <span className="text-[10px] text-amber-400/50 uppercase tracking-wider">Blocked</span>
+          <span className="text-[10px] text-cyan-400/50 uppercase tracking-wider">Blocked</span>
           {project.blockers.slice(0, 2).map((b, i) => (
-            <span key={i} className="text-xs text-amber-300/50 pl-2 before:content-['!'] before:mr-1.5 before:text-amber-400/40">
+            <span key={i} className="text-xs text-cyan-300/50 pl-2 before:content-['!'] before:mr-1.5 before:text-cyan-400/40">
               {b}
             </span>
           ))}

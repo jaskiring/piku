@@ -1,126 +1,47 @@
-import { useState, useEffect, useCallback, useRef } from 'react'
-import type { GraphNode, GraphEdge }                 from '../types'
-import { graphService }                              from '../index'
-import { graphActivityLog }                          from '../GraphActivityLog'
-import type { GraphActivityEvent }                   from '../GraphActivityLog'
-
-// ── Constants ──────────────────────────────────────────────────────────────
-
-const REL_LABEL: Record<string, string> = {
-  depends_on: 'depends on',
-  supports:   'supports',
-  blocks:     'blocks',
-  caused_by:  'caused by',
-  related_to: 'related to',
-  owned_by:   'owned by',
-}
-
-const TYPE_COLOR: Record<string, string> = {
-  project:  'text-blue-400/70',
-  goal:     'text-purple-400/70',
-  skill:    'text-green-400/70',
-  person:   'text-yellow-400/70',
-  memory:   'text-pink-400/70',
-  decision: 'text-orange-400/70',
-}
-
-const TYPE_DOT: Record<string, string> = {
-  project:  'bg-blue-400/60',
-  goal:     'bg-purple-400/60',
-  skill:    'bg-green-400/60',
-  person:   'bg-yellow-400/60',
-  memory:   'bg-pink-400/60',
-  decision: 'bg-orange-400/60',
-}
+import { useState, useEffect, useRef } from 'react'
+import type { Galaxy }                  from '../types'
+import { NODE_COLORS, DEFAULT_NODE_COLOR } from '../types'
+import { graphActivityLog }             from '../GraphActivityLog'
+import type { GraphActivityEvent }      from '../GraphActivityLog'
+import { chamfer, CornerTicks }         from '../../os/Hud'
 
 // ── Types ──────────────────────────────────────────────────────────────────
 
-interface EdgeRow {
-  edge:     GraphEdge
-  fromNode: GraphNode | undefined
-  toNode:   GraphNode | undefined
-}
-
 type StampedEvent = GraphActivityEvent & { id: number; ts: number }
+
+interface GraphPanelProps {
+  viewMode: 'macro' | 'micro'
+  activeGalaxy: string | null
+  galaxies: Galaxy[]
+  nodeCount: number
+  edgeCount: number
+  nodeTypeCounts: Record<string, number>
+}
 
 // ── Component ──────────────────────────────────────────────────────────────
 
-export function GraphPanel() {
-  const [rows,           setRows]           = useState<EdgeRow[]>([])
-  const [isExpanded,     setIsExpanded]     = useState(false)
-  const [isLoading,      setIsLoading]      = useState(false)
+export function GraphPanel({ viewMode, activeGalaxy, galaxies, nodeCount, edgeCount, nodeTypeCounts }: GraphPanelProps) {
+  const [show, setShow] = useState(false)
+  const [tab, setTab] = useState<'stats' | 'activity'>('stats')
   const [activityEvents, setActivityEvents] = useState<StampedEvent[]>(() =>
     graphActivityLog.getHistory() as StampedEvent[]
   )
-  const [isExtracting,   setIsExtracting]   = useState(false)
-  const [unreadCount,    setUnreadCount]    = useState(0)
+  const [unreadCount, setUnreadCount] = useState(0)
   const feedRef = useRef<HTMLDivElement>(null)
 
-  // ── Load graph state ─────────────────────────────────────────────────────
-
-  const load = useCallback(async () => {
-    setIsLoading(true)
-    try {
-      const [edges, nodes] = await Promise.all([
-        graphService['store'].getConfirmedEdges(),
-        graphService.getAllNodes(),
-      ])
-      const nodeMap = new Map(nodes.map(n => [n.id, n]))
-      setRows(
-        edges.map(edge => ({
-          edge,
-          fromNode: nodeMap.get(edge.fromId),
-          toNode:   nodeMap.get(edge.toId),
-        }))
-      )
-    } finally {
-      setIsLoading(false)
-    }
-  }, [])
-
-  useEffect(() => { void load() }, [load])
-
-  // ── Subscribe to activity log ────────────────────────────────────────────
-
   useEffect(() => {
-    const unsub = graphActivityLog.subscribe((event) => {
+    const unsub = graphActivityLog.subscribe(() => {
       setActivityEvents(graphActivityLog.getHistory() as StampedEvent[])
-
-      if (event.type === 'extraction_start') {
-        setIsExtracting(true)
-      } else if (
-        event.type === 'extraction_complete' ||
-        event.type === 'extraction_empty'
-      ) {
-        setIsExtracting(false)
-        // After extraction completes, refresh the edge table
-        void load()
-      }
-
-      // Increment unread badge when panel is collapsed
       setUnreadCount(prev => prev + 1)
     })
     return unsub
-  }, [load])
+  }, [])
 
-  // Auto-scroll activity feed to bottom when new events arrive
   useEffect(() => {
     if (feedRef.current) {
       feedRef.current.scrollTop = feedRef.current.scrollHeight
     }
   }, [activityEvents])
-
-  // ── Handlers ─────────────────────────────────────────────────────────────
-
-  const toggle = () => {
-    setIsExpanded(v => {
-      if (!v) {
-        void load()
-        setUnreadCount(0)
-      }
-      return !v
-    })
-  }
 
   const clearActivity = () => {
     graphActivityLog.clear()
@@ -128,156 +49,152 @@ export function GraphPanel() {
     setUnreadCount(0)
   }
 
-  // ── Render ───────────────────────────────────────────────────────────────
+  const toggle = () => {
+    setShow(v => {
+      if (!v) setUnreadCount(0)
+      return !v
+    })
+  }
+
+  const activeGalaxyData = activeGalaxy ? galaxies.find(g => g.id === activeGalaxy) : null
 
   return (
-    <div className="w-full flex flex-col gap-2">
-
-      {/* Toggle header */}
-      <button
-        onClick={toggle}
-        className="
-          flex items-center justify-between w-full
-          px-3 py-2 rounded-xl
-          text-xs text-white/40 hover:text-white/60
-          border border-white/6 hover:border-white/12
-          transition-colors duration-150
-        "
-      >
-        <span className="flex items-center gap-2">
-          {/* Pulsing dot when extraction is in progress */}
-          {isExtracting ? (
-            <span className="w-1.5 h-1.5 rounded-full bg-blue-400/80 animate-pulse" />
-          ) : (
-            <span className="text-white/25">⬡</span>
+    <>
+      {/* Toggle button — replaces old legend button */}
+      <div className="absolute bottom-7 right-6 z-40">
+        <button
+          onClick={toggle}
+          className="relative flex items-center gap-2 px-3 py-2 bg-[#0a1120]/80 backdrop-blur-xl transition-colors hover:bg-[#0a1120]/95"
+          style={{ ...chamfer(8), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.18), 0 8px 30px -10px rgba(0,0,0,0.7)' }}>
+          <CornerTicks accent="cyan" />
+          <span className="font-hud text-[9px] uppercase tracking-[0.15em] text-white/40">
+            {viewMode === 'macro' ? '✦ cosmos' : activeGalaxyData?.name ?? '✦ graph'}
+          </span>
+          <span className="font-hud text-[9px] text-white/20">{nodeCount}</span>
+          {!show && unreadCount > 0 && (
+            <span className="font-hud text-[8px] bg-cyan-500/30 text-cyan-300/80 px-1.5 py-0.5">{unreadCount}</span>
           )}
-          Knowledge Graph
-          {rows.length > 0 && (
-            <span className="text-white/25">({rows.length} link{rows.length !== 1 ? 's' : ''})</span>
-          )}
-          {/* Unread activity badge — shown when panel is collapsed */}
-          {!isExpanded && unreadCount > 0 && (
-            <span className="
-              text-[9px] bg-blue-500/30 text-blue-300/80
-              rounded-full px-1.5 py-0.5 leading-none
-            ">
-              {unreadCount} new
-            </span>
-          )}
-        </span>
-        <span className="text-white/20">{isExpanded ? '▲' : '▼'}</span>
-      </button>
+          <span className="font-hud text-[9px] text-white/20">{show ? '▲' : '▼'}</span>
+        </button>
+      </div>
 
-      {/* Expanded panel */}
-      {isExpanded && (
-        <div className="flex flex-col gap-3">
+      {/* Slide-in panel */}
+      {show && (
+        <div
+          className="
+            absolute bottom-7 right-6 z-40 w-80
+            bg-[#0a1120]/90 backdrop-blur-xl
+            transition-all duration-200
+          "
+          style={{ ...chamfer(8), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.18), 0 18px 40px rgba(0,0,0,0.6)' }}>
+          <CornerTicks accent="cyan" />
 
-          {/* ── Edge table ─────────────────────────────────────────────── */}
-          {isLoading ? (
-            <p className="text-xs text-white/25 text-center py-3">Loading…</p>
-          ) : rows.length === 0 ? (
-            <p className="text-xs text-white/25 text-center py-3">
-              No relationships yet — chat to build the graph.
-            </p>
-          ) : (
-            <div className="rounded-xl border border-white/6 overflow-hidden">
-              <table className="w-full text-xs">
-                <thead>
-                  <tr className="border-b border-white/6">
-                    <th className="text-left text-white/25 font-normal px-3 py-2">From</th>
-                    <th className="text-left text-white/25 font-normal px-3 py-2">Rel</th>
-                    <th className="text-left text-white/25 font-normal px-3 py-2">To</th>
-                    <th className="text-right text-white/25 font-normal px-3 py-2">Str</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {rows.map(({ edge, fromNode, toNode }) => (
-                    <tr key={edge.id} className="border-b border-white/4 last:border-0 hover:bg-white/2">
-                      <td className="px-3 py-2">
-                        {fromNode ? (
-                          <span>
-                            <span className={`${TYPE_COLOR[fromNode.type] ?? 'text-white/40'} mr-1`}>
-                              [{fromNode.type}]
-                            </span>
-                            <span className="text-white/70">{fromNode.name}</span>
-                          </span>
-                        ) : (
-                          <span className="text-white/20">{edge.fromId.slice(0, 8)}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-white/35 italic">
-                        {REL_LABEL[edge.relationship] ?? edge.relationship}
-                      </td>
-                      <td className="px-3 py-2">
-                        {toNode ? (
-                          <span>
-                            <span className={`${TYPE_COLOR[toNode.type] ?? 'text-white/40'} mr-1`}>
-                              [{toNode.type}]
-                            </span>
-                            <span className="text-white/70">{toNode.name}</span>
-                          </span>
-                        ) : (
-                          <span className="text-white/20">{edge.toId.slice(0, 8)}</span>
-                        )}
-                      </td>
-                      <td className="px-3 py-2 text-right text-white/35">
-                        {Math.round(edge.strength * 100)}%
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          )}
-
-          {/* ── Graph Activity Feed ─────────────────────────────────────── */}
-          <div className="flex flex-col gap-1.5">
-            <div className="flex items-center justify-between">
-              <span className="text-[10px] uppercase tracking-wider text-white/25 flex items-center gap-1.5">
-                {isExtracting && (
-                  <span className="w-1.5 h-1.5 rounded-full bg-blue-400/70 animate-pulse inline-block" />
-                )}
-                Graph Activity
-              </span>
-              {activityEvents.length > 0 && (
-                <button
-                  onClick={clearActivity}
-                  className="text-[10px] text-white/20 hover:text-white/45 transition-colors"
-                >
-                  clear
-                </button>
-              )}
-            </div>
-
-            <div
-              ref={feedRef}
-              className="
-                flex flex-col gap-1 max-h-52 overflow-y-auto
-                rounded-xl border border-white/6 bg-black/30
-                p-2
-              "
-            >
-              {activityEvents.length === 0 ? (
-                <p className="text-[11px] text-white/20 text-center py-2">
-                  Activity will appear here during extraction.
-                </p>
-              ) : (
-                activityEvents.map(event => (
-                  <ActivityRow key={event.id} event={event} />
-                ))
-              )}
-            </div>
+          {/* Tab bar */}
+          <div className="flex border-b border-white/6 px-3 pt-2.5 pb-0 gap-4">
+            <button
+              onClick={() => setTab('stats')}
+              className={`font-hud text-[9px] uppercase tracking-[0.15em] pb-2 border-b-2 transition-colors ${tab === 'stats' ? 'text-cyan-300/70 border-cyan-400/40' : 'text-white/30 border-transparent hover:text-white/50'}`}>
+              Graph
+            </button>
+            <button
+              onClick={() => setTab('activity')}
+              className={`font-hud text-[9px] uppercase tracking-[0.15em] pb-2 border-b-2 transition-colors ${tab === 'activity' ? 'text-cyan-300/70 border-cyan-400/40' : 'text-white/30 border-transparent hover:text-white/50'}`}>
+              Activity{unreadCount > 0 && <span className="ml-1 text-[8px] bg-cyan-500/30 text-cyan-300/80 px-1.5 py-0.5">{unreadCount}</span>}
+            </button>
           </div>
 
-          <button
-            onClick={() => void load()}
-            className="text-[10px] text-white/20 hover:text-white/40 text-right transition-colors"
-          >
-            refresh
-          </button>
+          {/* Tab content */}
+          <div className="p-3 max-h-[60vh] overflow-y-auto">
+            {tab === 'stats' && (
+              <div className="flex flex-col gap-3">
+
+                {/* Galaxy info */}
+                <div className="flex items-center gap-2">
+                  <span className="font-hud text-[10px] uppercase tracking-[0.15em] text-white/25">
+                    {viewMode === 'macro' ? 'Void' : (activeGalaxyData?.name ?? 'Graph')}
+                  </span>
+                  <span className="font-hud text-[9px] text-white/15">
+                    {viewMode === 'macro'
+                      ? `${galaxies.length} galaxy${galaxies.length !== 1 ? 'ies' : ''}`
+                      : activeGalaxyData?.kind?.toUpperCase() ?? ''}
+                  </span>
+                </div>
+
+                {/* Counts row */}
+                <div className="flex gap-3 text-xs">
+                  <div className="flex-1 rounded-lg bg-white/[0.03] border border-white/6 px-3 py-2">
+                    <div className="font-hud text-[18px] text-white/70">{nodeCount}</div>
+                    <div className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/25">nodes</div>
+                  </div>
+                  <div className="flex-1 rounded-lg bg-white/[0.03] border border-white/6 px-3 py-2">
+                    <div className="font-hud text-[18px] text-white/50">{edgeCount}</div>
+                    <div className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/25">edges</div>
+                  </div>
+                </div>
+
+                {/* Node type distribution */}
+                <div className="flex flex-col gap-1.5">
+                  <div className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/20 mb-0.5">Types</div>
+                  {Object.entries(nodeTypeCounts)
+                    .sort((a, b) => b[1] - a[1])
+                    .map(([type, count]) => (
+                      <div key={type} className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: NODE_COLORS[type] ?? DEFAULT_NODE_COLOR }} />
+                        <span className="font-hud text-[9px] uppercase tracking-[0.12em] text-white/40 flex-1">{type}</span>
+                        <span className="font-hud text-[9px] text-white/25">{count}</span>
+                      </div>
+                    ))}
+                </div>
+
+                {/* Galaxy list (macro) or detail (micro) */}
+                {viewMode === 'macro' && (
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/6">
+                    <div className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/20 mb-0.5">Galaxies</div>
+                    {galaxies.map(g => (
+                      <div key={g.id} className="flex items-center gap-2">
+                        <span className="w-2 h-2 rounded-full shrink-0" style={{ background: galaxyColor(g) }} />
+                        <span className="font-hud text-[9px] uppercase tracking-[0.12em] text-white/35 flex-1">{g.name}</span>
+                        <span className="font-hud text-[8px] text-white/20">{g.nodes.length} nodes</span>
+                      </div>
+                    ))}
+                  </div>
+                )}
+
+                {viewMode === 'micro' && activeGalaxyData && (
+                  <div className="flex flex-col gap-1.5 pt-1 border-t border-white/6">
+                    <div className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/20 mb-0.5">Galaxy</div>
+                    <div className="font-hud text-[10px] text-white/50">{activeGalaxyData.name}</div>
+                    <div className="font-hud text-[8px] text-white/25">
+                      {activeGalaxyData.nodes.length} nodes · {activeGalaxyData.edges.length} edges · {activeGalaxyData.kind}
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+            {tab === 'activity' && (
+              <div className="flex flex-col gap-1.5">
+                <div className="flex items-center justify-between">
+                  <span className="font-hud text-[8px] uppercase tracking-[0.15em] text-white/20">Graph Activity</span>
+                  {activityEvents.length > 0 && (
+                    <button onClick={clearActivity} className="font-hud text-[8px] text-white/20 hover:text-white/45 transition-colors">clear</button>
+                  )}
+                </div>
+                <div ref={feedRef} className="flex flex-col gap-1 max-h-48 overflow-y-auto rounded-lg bg-black/30 border border-white/6 p-2">
+                  {activityEvents.length === 0 ? (
+                    <p className="font-hud text-[10px] text-white/20 text-center py-2">Activity appears here during extraction.</p>
+                  ) : (
+                    activityEvents.map(event => (
+                      <ActivityRow key={event.id} event={event} />
+                    ))
+                  )}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
       )}
-    </div>
+    </>
   )
 }
 
@@ -288,74 +205,78 @@ function ActivityRow({ event }: { event: StampedEvent }) {
     case 'extraction_start':
       return (
         <div className="flex items-center gap-2 py-0.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-blue-400/50 shrink-0 animate-pulse" />
-          <span className="text-[11px] text-blue-300/50">Extraction started</span>
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/50 shrink-0 animate-pulse" />
+          <span className="font-hud text-[10px] text-cyan-300/50">Extraction started</span>
         </div>
       )
-
     case 'extraction_empty':
       return (
         <div className="flex items-center gap-2 py-0.5">
           <span className="w-1.5 h-1.5 rounded-full bg-white/20 shrink-0" />
-          <span className="text-[11px] text-white/25">No relationships found</span>
+          <span className="font-hud text-[10px] text-white/25">No relationships found</span>
         </div>
       )
-
     case 'extraction_complete':
       return (
         <div className="flex items-center gap-2 py-0.5">
-          <span className="w-1.5 h-1.5 rounded-full bg-emerald-400/60 shrink-0" />
-          <span className="text-[11px] text-emerald-300/60">
+          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/60 shrink-0" />
+          <span className="font-hud text-[10px] text-cyan-300/60">
             Complete — {event.itemCount} item{event.itemCount !== 1 ? 's' : ''} processed
           </span>
         </div>
       )
-
     case 'node_created': {
-      const dot   = TYPE_DOT[event.node.type]   ?? 'bg-white/30'
-      const color = TYPE_COLOR[event.node.type] ?? 'text-white/40'
+      const dotCls = event.node.type === 'project' ? 'bg-blue-400/60'
+        : event.node.type === 'goal' ? 'bg-purple-400/60'
+        : event.node.type === 'skill' ? 'bg-green-400/60'
+        : event.node.type === 'person' ? 'bg-yellow-400/60'
+        : event.node.type === 'memory' ? 'bg-pink-400/60'
+        : event.node.type === 'decision' ? 'bg-orange-400/60'
+        : event.node.type === 'repository' ? 'bg-blue-500/60'
+        : event.node.type === 'technology' ? 'bg-sky-400/60'
+        : event.node.type === 'concept' ? 'bg-cyan-400/60'
+        : 'bg-white/30'
+      const txtCls = event.node.type === 'project' ? 'text-blue-400/70'
+        : event.node.type === 'goal' ? 'text-purple-400/70'
+        : event.node.type === 'skill' ? 'text-green-400/70'
+        : event.node.type === 'person' ? 'text-yellow-400/70'
+        : event.node.type === 'memory' ? 'text-pink-400/70'
+        : event.node.type === 'decision' ? 'text-orange-400/70'
+        : event.node.type === 'repository' ? 'text-blue-500/70'
+        : event.node.type === 'technology' ? 'text-sky-400/70'
+        : event.node.type === 'concept' ? 'text-cyan-400/70'
+        : 'text-white/40'
       return (
         <div className="flex items-center gap-2 py-0.5">
-          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dot} ${event.isNew ? '' : 'opacity-40'}`} />
-          <span className="text-[11px] text-white/50">
+          <span className={`w-1.5 h-1.5 rounded-full shrink-0 ${dotCls} ${event.isNew ? '' : 'opacity-40'}`} />
+          <span className="font-hud text-[10px] text-white/50">
             {event.isNew ? '＋' : '→'}
-            {' '}
-            <span className={`${color} text-[10px]`}>[{event.node.type}]</span>
-            {' '}
-            <span className={event.isNew ? 'text-white/70' : 'text-white/35'}>
-              {event.node.name}
-            </span>
-            {!event.isNew && (
-              <span className="text-white/20 text-[10px] ml-1">(existing)</span>
-            )}
+            <span className={`${txtCls} text-[9px] ml-1`}>[{event.node.type}]</span>
+            <span className={event.isNew ? 'text-white/70 ml-1' : 'text-white/35 ml-1'}>{event.node.name}</span>
+            {!event.isNew && <span className="text-white/20 text-[9px] ml-1">(existing)</span>}
           </span>
         </div>
       )
     }
-
-    case 'edge_created': {
-      const fromColor = TYPE_COLOR[event.fromType] ?? 'text-white/40'
-      const toColor   = TYPE_COLOR[event.toType]   ?? 'text-white/40'
-      const relLabel  = REL_LABEL[event.edge.relationship] ?? event.edge.relationship
+    case 'edge_created':
       return (
-        <div className="flex flex-col gap-0.5 py-0.5 pl-3 border-l border-white/8">
-          <div className="flex items-center gap-1.5 text-[11px]">
-            <span className={`${fromColor} text-[10px]`}>[{event.fromType}]</span>
-            <span className="text-white/65">{event.fromName}</span>
-            <span className="text-white/25">·</span>
-            <span className="text-white/30 italic text-[10px]">{relLabel}</span>
-            <span className="text-white/25">·</span>
-            <span className={`${toColor} text-[10px]`}>[{event.toType}]</span>
-            <span className="text-white/65">{event.toName}</span>
+        <div className="flex flex-col gap-0.5 py-0.5 pl-2 border-l border-white/8">
+          <div className="flex items-center gap-1.5 font-hud text-[10px]">
+            <span className="text-white/45">{event.fromName}</span>
+            <span className="text-white/20 text-[8px] italic">{event.edge.relationship}</span>
+            <span className="text-white/45">{event.toName}</span>
           </div>
-          <span className="text-[10px] text-white/25 pl-0.5">
-            confidence: {Math.round(event.edge.strength * 100)}%
-            {event.edge.status === 'pending' && (
-              <span className="ml-1 text-amber-400/40">(pending)</span>
-            )}
+          <span className="font-hud text-[8px] text-white/20 pl-0.5">
+            {Math.round(event.edge.strength * 100)}% confidence
+            {event.edge.status === 'pending' && <span className="ml-1 text-cyan-400/40">(pending)</span>}
           </span>
         </div>
       )
-    }
   }
+}
+
+function galaxyColor(g: Galaxy): string {
+  if (g.kind === 'core') return '#22D3EE'
+  if (g.kind === 'project') return '#60A5FA'
+  return '#A78BFA'
 }
