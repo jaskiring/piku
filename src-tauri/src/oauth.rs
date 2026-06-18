@@ -1,6 +1,46 @@
 use std::io::{Read, Write};
 use std::net::TcpListener;
+use std::process::Command;
 use std::time::Duration;
+
+// Google's OAuth token endpoint and APIs don't send CORS headers, so a webview `fetch()` to them
+// is blocked. We proxy those calls through curl in Rust (same approach as os_tools::fetch_url),
+// which has no CORS restriction.
+
+/// POST application/x-www-form-urlencoded (OAuth token exchange / refresh).
+#[tauri::command]
+pub fn http_post_form(url: String, body: String) -> Result<String, String> {
+    let out = Command::new("curl")
+        .arg("-sS")
+        .arg("--max-time").arg("25")
+        .arg("-X").arg("POST")
+        .arg("-H").arg("Content-Type: application/x-www-form-urlencoded")
+        .arg("--data").arg(&body)
+        .arg(&url)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("curl POST failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+/// GET with an optional Authorization header (Google APIs, e.g. Gmail).
+#[tauri::command]
+pub fn http_get(url: String, authorization: Option<String>) -> Result<String, String> {
+    let mut cmd = Command::new("curl");
+    cmd.arg("-sS").arg("--max-time").arg("25").arg(&url);
+    if let Some(auth) = authorization {
+        if !auth.is_empty() {
+            cmd.arg("-H").arg(format!("Authorization: {auth}"));
+        }
+    }
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("curl GET failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
 
 // Desktop OAuth loopback catcher. Google's installed-app flow redirects to http://127.0.0.1:PORT
 // with ?code=...; Google deprecated the out-of-band copy/paste flow, so a tiny one-shot local

@@ -25,6 +25,8 @@ pub fn run() {
             tts::piper_speak,
             tts::piper_available,
             oauth::oauth_listen,
+            oauth::http_post_form,
+            oauth::http_get,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;

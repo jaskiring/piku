@@ -1,6 +1,7 @@
 // Google OAuth (installed-app / loopback flow) for Gmail. The Rust `oauth_listen` command catches
-// the redirect on 127.0.0.1; we exchange the code for tokens here. Client id/secret come from
-// .env.local (gitignored). Google deprecated the copy/paste OOB flow, so loopback is the way.
+// the redirect on 127.0.0.1; token exchange + userinfo go through Rust curl (`http_post_form` /
+// `http_get`) because Google's endpoints don't send CORS headers, so a webview fetch() is blocked.
+// Client id/secret come from .env.local (gitignored). Google deprecated the OOB copy/paste flow.
 
 const PORT = 8731
 const REDIRECT = `http://127.0.0.1:${PORT}`
@@ -41,37 +42,34 @@ export async function connectGoogle(): Promise<GoogleTokens> {
   await invokeTauri('open_path', { target: authUrl })
   const code = await codePromise
 
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({
-      code, client_id: clientId, client_secret: clientSecret, redirect_uri: REDIRECT, grant_type: 'authorization_code',
-    }).toString(),
-  })
-  if (!res.ok) throw new Error(`token exchange failed: ${res.status} ${await res.text()}`)
-  const t = await res.json() as { access_token: string; refresh_token?: string; expires_in: number }
+  // Exchange the code via Rust curl (Google's token endpoint has no CORS for webview fetch).
+  const body = new URLSearchParams({
+    code, client_id: clientId, client_secret: clientSecret, redirect_uri: REDIRECT, grant_type: 'authorization_code',
+  }).toString()
+  const raw = await invokeTauri<string>('http_post_form', { url: 'https://oauth2.googleapis.com/token', body })
+  let t: { access_token?: string; refresh_token?: string; expires_in?: number; error?: string; error_description?: string }
+  try { t = JSON.parse(raw) } catch { throw new Error(`token exchange — unexpected response: ${raw.slice(0, 180)}`) }
+  if (t.error || !t.access_token) throw new Error(`token exchange failed: ${t.error ?? ''} ${t.error_description ?? raw.slice(0, 180)}`)
 
-  // who did they connect as?
   let email: string | undefined
   try {
-    const me = await fetch('https://www.googleapis.com/oauth2/v2/userinfo', { headers: { Authorization: `Bearer ${t.access_token}` } })
-    if (me.ok) email = (await me.json() as { email?: string }).email
+    const meRaw = await invokeTauri<string>('http_get', { url: 'https://www.googleapis.com/oauth2/v2/userinfo', authorization: `Bearer ${t.access_token}` })
+    email = (JSON.parse(meRaw) as { email?: string }).email
   } catch { /* non-fatal */ }
 
-  return { accessToken: t.access_token, refreshToken: t.refresh_token, expiresAt: Date.now() + t.expires_in * 1000, email }
+  return { accessToken: t.access_token, refreshToken: t.refresh_token, expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000, email }
 }
 
-// Mint a fresh access token from a stored refresh token.
+// Mint a fresh access token from a stored refresh token (via Rust curl).
 export async function refreshGoogle(refreshToken: string): Promise<{ accessToken: string; expiresAt: number } | null> {
   const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID
   const clientSecret = import.meta.env.VITE_GOOGLE_CLIENT_SECRET
   if (!clientId || !clientSecret) return null
-  const res = await fetch('https://oauth2.googleapis.com/token', {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
-    body: new URLSearchParams({ refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret, grant_type: 'refresh_token' }).toString(),
-  })
-  if (!res.ok) return null
-  const t = await res.json() as { access_token: string; expires_in: number }
-  return { accessToken: t.access_token, expiresAt: Date.now() + t.expires_in * 1000 }
+  const body = new URLSearchParams({ refresh_token: refreshToken, client_id: clientId, client_secret: clientSecret, grant_type: 'refresh_token' }).toString()
+  try {
+    const raw = await invokeTauri<string>('http_post_form', { url: 'https://oauth2.googleapis.com/token', body })
+    const t = JSON.parse(raw) as { access_token?: string; expires_in?: number }
+    if (!t.access_token) return null
+    return { accessToken: t.access_token, expiresAt: Date.now() + (t.expires_in ?? 3600) * 1000 }
+  } catch { return null }
 }

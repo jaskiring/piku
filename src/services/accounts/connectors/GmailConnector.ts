@@ -16,10 +16,13 @@ async function freshToken(account: ServiceAccount): Promise<string | null> {
   return r.accessToken
 }
 
+// Gmail API GETs go through Rust curl (no CORS), same as the OAuth exchange.
 async function api<T>(token: string, path: string): Promise<T | null> {
   try {
-    const r = await fetch(`https://gmail.googleapis.com/gmail/v1/users/me${path}`, { headers: { Authorization: `Bearer ${token}` } })
-    return r.ok ? r.json() : null
+    const { invoke } = await import('@tauri-apps/api/core')
+    const raw = await invoke<string>('http_get', { url: `https://gmail.googleapis.com/gmail/v1/users/me${path}`, authorization: `Bearer ${token}` })
+    const data = JSON.parse(raw)
+    return data?.error ? null : data as T
   } catch { return null }
 }
 
