@@ -5,6 +5,7 @@ mod observer;
 mod os_tools;
 mod tts;
 mod tray_manager;
+mod webwin;
 mod window_manager;
 
 #[cfg_attr(mobile, tauri::mobile_entry_point)]
@@ -27,6 +28,7 @@ pub fn run() {
             oauth::oauth_listen,
             oauth::http_post_form,
             oauth::http_get,
+            webwin::open_web_window,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;

@@ -151,92 +151,138 @@ export function DatasetsScreen() {
   )
 }
 
-/* ───────────────────────── Apps (the observation loop's senses) ───────────────────────── */
-const fmtDur = (ms: number) => { const m = Math.round(ms / 60000); return m >= 1 ? `${m}m` : `${Math.round(ms / 1000)}s` }
+/* ───────────────────────── Apps — comms + coding dashboard ───────────────────────── */
 
 export function AppsScreen() {
   const [obs, setObs] = useState<ObserverState | null>(null)
-  useEffect(() => {
-    activeAppObserver.start()                       // consent-on-visit: starts observing when you open Apps
-    return activeAppObserver.subscribe(setObs)      // keeps running in the background after you leave
-  }, [])
-
-  const topApps = obs ? Object.entries(obs.appTotalsMs).sort((a, b) => b[1] - a[1]).slice(0, 6) : []
-  const planned = [
-    { name: 'Git',      desc: 'Observe commits & repo activity', glyph: '⎇' },
-    { name: 'Browser',  desc: 'Capture pages you read',          glyph: '◉' },
-    { name: 'Calendar', desc: 'Pull events into the timeline',   glyph: '◷' },
-    { name: 'Mail',     desc: 'Summarize threads',               glyph: '✉' },
-    { name: 'Files',    desc: 'Watch folders for changes',       glyph: '▭' },
-  ]
+  useEffect(() => { activeAppObserver.start(); return activeAppObserver.subscribe(setObs) }, [])
 
   return (
-    <ScreenShell title="Apps" subtitle="The senses of the observation loop — what Piku watches to build your World Model.">
+    <ScreenShell title="Apps" subtitle="Your services in one place — comms on the left, your coding world on the right.">
       <div className="grid grid-cols-12 gap-4">
-        {/* The live observer — the loop's first heartbeat */}
-        <Card title="Active-App Observer" className="col-span-12 lg:col-span-7"
-          action={<span className="text-[10px] flex items-center gap-1.5">
-            <span className={`w-1.5 h-1.5 rounded-full ${obs?.observing ? 'bg-cyan-400 animate-pulse' : 'bg-white/30'}`} />
-            <span className={obs?.observing ? 'text-cyan-300/80' : 'text-white/40'}>{obs?.observing ? 'observing' : 'idle'}</span>
-          </span>}>
-          {!activeAppObserver.isTauri ? (
-            <Hint>Runs in the desktop app — it watches whichever app you're working in.</Hint>
-          ) : obs && !obs.permissionOk ? (
-            <Hint>Needs macOS <span className="text-white/70">Automation</span> permission to see the active app — approve the prompt (or System Settings → Privacy &amp; Security → Automation → piku).</Hint>
-          ) : (
-            <>
-              <div className="rounded-xl bg-cyan-500/[0.06] border border-cyan-400/15 px-3 py-2.5 mb-3">
-                <div className="text-[10px] text-cyan-300/60 mb-0.5">now observing</div>
-                <div className="text-sm text-white/90 truncate">{obs?.current?.app || '—'}</div>
-                {obs?.current?.title && <div className="text-[11px] text-white/40 truncate">{obs.current.title}</div>}
-              </div>
-              <div className="text-[10px] text-white/35 mb-2">{obs?.observationCount ?? 0} observations this session · held as proposals (P6: a World-Model write needs your approval)</div>
-              <div className="flex flex-col gap-1.5">
-                {(obs?.sessions ?? []).slice(0, 6).map((s, i) => (
-                  <div key={i} className="flex items-center gap-2 text-xs">
-                    <span className="w-1 h-1 rounded-full bg-cyan-300/50 shrink-0" />
-                    <span className="text-white/75 truncate">{s.app}{s.title ? ` — ${s.title}` : ''}</span>
-                  </div>
-                ))}
-                {(!obs || obs.sessions.length === 0) && <Hint>Switch to another app — Piku will note it here.</Hint>}
-              </div>
-            </>
-          )}
-        </Card>
+        {/* ── COMMS ── */}
+        <div className="col-span-12 lg:col-span-5 flex flex-col gap-4">
+          <SectionLabel>Comms</SectionLabel>
+          <GmailWidget />
+          <div className="grid grid-cols-2 gap-4">
+            <LaunchTile app="whatsapp" name="WhatsApp" desc="Chats · scan QR once" />
+            <LaunchTile app="linkedin" name="LinkedIn" desc="Feed · messages" />
+          </div>
+        </div>
 
-        {/* Time-per-app */}
-        <Card title="Focus this session" className="col-span-12 lg:col-span-5">
-          {topApps.length === 0 ? <Hint>No focus data yet — give it a minute.</Hint> : (
-            <div className="flex flex-col gap-2.5 pt-0.5">
-              {topApps.map(([app, ms]) => (
-                <div key={app} className="flex items-center justify-between text-xs">
-                  <span className="text-white/70 truncate pr-2">{app}</span>
-                  <span className="text-cyan-300/70">{fmtDur(ms)}</span>
-                </div>
-              ))}
-            </div>
-          )}
-        </Card>
-
-        {/* Planned senses */}
-        {planned.map(a => (
-          <Card key={a.name} className="col-span-12 md:col-span-6 lg:col-span-4">
-            <div className="flex items-center gap-2.5">
-              <span className="w-9 h-9 rounded-xl bg-white/5 border border-white/10 flex items-center justify-center text-white/55">{a.glyph}</span>
-              <div className="flex-1 min-w-0"><div className="text-sm text-white/90">{a.name}</div><div className="text-[10px] text-white/40 truncate">{a.desc}</div></div>
-              <span className="text-[11px] text-cyan-200/60 border border-cyan-300/20 rounded-lg px-2 py-1">soon</span>
-            </div>
+        {/* ── CODING ── */}
+        <div className="col-span-12 lg:col-span-7 flex flex-col gap-4">
+          <SectionLabel>Coding</SectionLabel>
+          <CodingWidget />
+          {/* live focus, kept compact */}
+          <Card title="Now" action={<span className="text-[10px] flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full ${obs?.observing ? 'bg-cyan-400 animate-pulse' : 'bg-white/30'}`} /><span className={obs?.observing ? 'text-cyan-300/80' : 'text-white/40'}>{obs?.observing ? 'observing' : 'idle'}</span></span>}>
+            <div className="text-sm text-white/85 truncate">{obs?.current?.app || '—'}</div>
+            {obs?.current?.title && <div className="text-[11px] text-white/40 truncate">{obs.current.title}</div>}
           </Card>
-        ))}
+        </div>
       </div>
       <BuildStatus items={[
-        { label: 'Active-App observer (live)', state: 'active' },
-        { label: 'Rust active_window command', state: 'built' },
-        { label: 'World-Model graph + applyApprovedDiff', state: 'built' },
-        { label: 'Approval surface for WM writes', state: 'planned' },
-        { label: 'Git / Browser / Calendar observers', state: 'planned' },
+        { label: 'Gmail + GitHub live widgets', state: 'built' },
+        { label: 'WhatsApp / LinkedIn windows', state: 'built' },
+        { label: 'Jira connector → email↔ticket↔commit flow', state: 'planned' },
+        { label: 'Google Calendar (both accounts)', state: 'planned' },
       ]} />
     </ScreenShell>
+  )
+}
+
+function SectionLabel({ children }: { children: ReactNode }) {
+  return <div className="font-hud text-[10px] uppercase tracking-[0.28em] text-cyan-300/50 px-1">{children}</div>
+}
+
+function LaunchTile({ app, name, desc }: { app: 'whatsapp' | 'linkedin'; name: string; desc: string }) {
+  const a = WEB_APPS[app]
+  return (
+    <button onClick={() => void openWebWindow(a.label, a.url, a.title)}
+      className="text-left rounded-2xl bg-gradient-to-b from-white/[0.05] to-white/[0.015] border border-white/10 ring-1 ring-inset ring-white/[0.04] p-4 hover:border-cyan-400/30 transition-colors">
+      <div className="flex items-center gap-2.5">
+        <span className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/80">{a.glyph}</span>
+        <div className="flex-1 min-w-0"><div className="text-sm text-white/90">{name}</div><div className="text-[10px] text-white/40 truncate">{desc}</div></div>
+        <span className="text-[11px] text-cyan-200/60 border border-cyan-300/20 rounded-lg px-2 py-1">open ↗</span>
+      </div>
+    </button>
+  )
+}
+
+function GmailWidget() {
+  const [groups, setGroups] = useState<{ acct: string; label: string; mail: MailSummary[] }[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const accts = (await accountService.getByService('email')).filter(a => a.enabled && a.token)
+      const out: { acct: string; label: string; mail: MailSummary[] }[] = []
+      for (const a of accts) {
+        try { out.push({ acct: a.email ?? a.label, label: a.label, mail: await gmailConnector.search(a, 'is:unread newer_than:3d', 5) }) }
+        catch { out.push({ acct: a.email ?? a.label, label: a.label, mail: [] }) }
+      }
+      if (!cancelled) { setGroups(out); setLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return (
+    <Card title="Gmail" action={<span className="font-hud text-[10px] text-white/30 uppercase">unread · 3d</span>}>
+      {loading ? <Hint>loading…</Hint>
+        : groups.length === 0 ? <Hint>No Gmail connected — Settings → Gmail.</Hint>
+        : groups.map(g => (
+          <div key={g.acct} className="mb-2 last:mb-0">
+            <div className="font-hud text-[9.5px] uppercase tracking-wider text-cyan-300/50 mt-1 mb-1">{g.label} · {g.acct}</div>
+            {g.mail.length === 0 ? <div className="text-[11px] text-white/30 py-0.5">no unread</div>
+              : g.mail.map(m => (
+                <div key={m.id} className="py-1.5 border-b border-white/5 last:border-0">
+                  <div className="text-[12.5px] text-white/85 truncate">{m.from.replace(/<.*>/, '').trim()}</div>
+                  <div className="text-[11px] text-white/45 truncate">{m.subject}</div>
+                </div>
+              ))}
+          </div>
+        ))}
+    </Card>
+  )
+}
+
+function CodingWidget() {
+  const [rows, setRows] = useState<{ label: string; user: string; total: number; repos: string[] }[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      const accts = (await accountService.getByService('github')).filter(a => a.enabled && a.token)
+      const d = new Date(Date.now() - 7 * 864e5)
+      const since = `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`
+      const out: { label: string; user: string; total: number; repos: string[] }[] = []
+      for (const a of accts) {
+        const r = await gitHubConnector.commitsSince(a, since)
+        out.push({
+          label: a.label, user: a.username ?? '', total: r?.total ?? 0,
+          repos: r ? Object.entries(r.byRepo).sort((x, y) => y[1] - x[1]).slice(0, 4).map(([rp, n]) => `${rp.split('/').pop()} (${n})`) : [],
+        })
+      }
+      if (!cancelled) { setRows(out); setLoading(false) }
+    })()
+    return () => { cancelled = true }
+  }, [])
+  return (
+    <Card title="GitHub — commits, last 7 days" action={<span className="font-hud text-[10px] text-white/30 uppercase">by account</span>}>
+      {loading ? <Hint>loading…</Hint>
+        : rows.length === 0 ? <Hint>No GitHub connected — Settings → GitHub.</Hint>
+        : rows.map(r => (
+          <div key={r.label} className="py-2 border-b border-white/5 last:border-0">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-white/85">{r.label} <span className="text-white/35 text-xs">@{r.user}</span></span>
+              <span className="text-cyan-300/80 text-xs tabular-nums">{r.total} commits</span>
+            </div>
+            {r.repos.length > 0 && <div className="text-[11px] text-white/45 mt-1 truncate">{r.repos.join('  ·  ')}</div>}
+          </div>
+        ))}
+      <div className="mt-3 pt-2.5 border-t border-white/5 text-[11px] text-white/40 leading-relaxed">
+        <span className="text-cyan-300/60">+ Jira</span> — next: thread <span className="text-white/60">work email → ticket → the commits that close it</span>.
+      </div>
+    </Card>
   )
 }
 
@@ -332,8 +378,9 @@ export function PeopleScreen() {
 }
 
 /* ───────────────────────── Settings ───────────────────────── */
-import { accountService, gitHubConnector, connectGoogle, googleConfigured } from '../../../services/accounts'
-import type { ServiceAccount, ServiceType } from '../../../services/accounts'
+import { accountService, gitHubConnector, gmailConnector, connectGoogle, googleConfigured } from '../../../services/accounts'
+import type { ServiceAccount, ServiceType, MailSummary } from '../../../services/accounts'
+import { openWebWindow, WEB_APPS } from '../../../services/webwin'
 
 function GmailCard() {
   const [accounts, setAccounts] = useState<ServiceAccount[]>([])
@@ -450,6 +497,19 @@ function AddAccountForm({ service, onAdded }: { service: ServiceType; onAdded: (
   )
 }
 
+function WebAppCard({ app, name, desc }: { app: 'whatsapp' | 'linkedin'; name: string; desc: string }) {
+  const a = WEB_APPS[app]
+  return (
+    <Card title={name} className="col-span-12 md:col-span-6">
+      <p className="text-xs text-white/45 mb-3 leading-relaxed">{desc}</p>
+      <button onClick={() => void openWebWindow(a.label, a.url, a.title)}
+        className="font-hud text-[10px] uppercase tracking-wider text-cyan-200 bg-cyan-500/12 hover:bg-cyan-500/20 border border-cyan-400/20 px-3 py-1.5 transition-colors">
+        Open {name} ↗
+      </button>
+    </Card>
+  )
+}
+
 function ServiceCard({ service, title }: { service: ServiceType; title: string }) {
   const [accounts, setAccounts] = useState<ServiceAccount[]>([])
   const load = () => { void accountService.getByService(service).then(setAccounts) }
@@ -502,10 +562,8 @@ export function SettingsScreen() {
         {/* Connected accounts — multi-account per service */}
         <ServiceCard service="github" title="GitHub" />
         <GmailCard />
-        <ServiceCard service="whatsapp" title="WhatsApp" />
-        <ServiceCard service="slack" title="Slack" />
-        <ServiceCard service="calendar" title="Calendar" />
-        <ServiceCard service="gitlab" title="GitLab" />
+        <WebAppCard app="whatsapp" name="WhatsApp" desc="Opens WhatsApp Web in a dedicated window — scan the QR once, stays signed in." />
+        <WebAppCard app="linkedin" name="LinkedIn" desc="Opens LinkedIn in a dedicated window — log in once, stays signed in." />
 
       </div>
       <BuildStatus items={[
