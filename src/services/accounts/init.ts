@@ -24,4 +24,20 @@ export async function seedAccounts(): Promise<void> {
       await accountService.save({ ...current, token: seed.token ?? current.token, username: seed.username })
     }
   }
+
+  // Dedup: earlier runs left multiple github rows for the same account. Keep ONE per username,
+  // preferring a canonical-labelled (Personal/Office), token-bearing entry; remove the rest.
+  const canonical = new Set(['personal', 'office'])
+  const ranked = (await accountService.getByService('github')).slice().sort((a, b) => {
+    const ca = canonical.has(a.label.toLowerCase()) ? 0 : 1
+    const cb = canonical.has(b.label.toLowerCase()) ? 0 : 1
+    if (ca !== cb) return ca - cb
+    return (b.token ? 1 : 0) - (a.token ? 1 : 0)
+  })
+  const seen = new Set<string>()
+  for (const a of ranked) {
+    const key = (a.username ?? a.label).toLowerCase()
+    if (seen.has(key)) await accountService.delete(a.id)
+    else seen.add(key)
+  }
 }
