@@ -6,6 +6,8 @@ export async function openWebWindow(label: string, url: string, title: string): 
 }
 
 export const WEB_APPS: Record<string, { label: string; url: string; title: string; glyph: string }> = {
-  whatsapp: { label: 'whatsapp', url: 'https://web.whatsapp.com',  title: 'WhatsApp', glyph: '◍' },
+  whatsapp: { label: 'whatsapp', url: 'https://web.whatsapp.com',      title: 'WhatsApp', glyph: '◍' },
   linkedin: { label: 'linkedin', url: 'https://www.linkedin.com/feed/', title: 'LinkedIn', glyph: 'in' },
+  gmail:    { label: 'gmail',    url: 'https://mail.google.com',        title: 'Gmail',    glyph: '✉' },
+  github:   { label: 'github',   url: 'https://github.com',             title: 'GitHub',   glyph: '⎇' },
 }
