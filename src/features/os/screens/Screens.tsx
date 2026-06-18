@@ -209,6 +209,33 @@ function LaunchTile({ app, name, desc }: { app: 'whatsapp' | 'linkedin'; name: s
   )
 }
 
+function mailTime(raw: string): string {
+  const d = new Date(raw)
+  if (isNaN(d.getTime())) return ''
+  const now = new Date()
+  return d.toDateString() === now.toDateString()
+    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
+    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
+}
+
+function MailRow({ m }: { m: MailSummary }) {
+  const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
+  const initial = (name[0] || '?').toUpperCase()
+  return (
+    <div className="flex items-start gap-2.5 py-2 px-1 border-b border-white/[0.04] hover:bg-white/[0.03] transition-colors">
+      <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-cyan-500/25 text-cyan-100' : 'bg-white/8 text-white/50'}`}>{initial}</span>
+      <div className="flex-1 min-w-0">
+        <div className="flex items-center justify-between gap-2">
+          <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
+          <span className="text-[10px] text-white/30 shrink-0 font-hud">{mailTime(m.date)}</span>
+        </div>
+        <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
+        <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
+      </div>
+    </div>
+  )
+}
+
 function GmailWidget() {
   const [groups, setGroups] = useState<{ acct: string; label: string; mail: MailSummary[] }[]>([])
   const [loading, setLoading] = useState(true)
@@ -218,7 +245,7 @@ function GmailWidget() {
       const accts = (await accountService.getByService('email')).filter(a => a.enabled && a.token)
       const out: { acct: string; label: string; mail: MailSummary[] }[] = []
       for (const a of accts) {
-        try { out.push({ acct: a.email ?? a.label, label: a.label, mail: await gmailConnector.search(a, 'is:unread newer_than:3d', 5) }) }
+        try { out.push({ acct: a.email ?? a.label, label: a.label, mail: await gmailConnector.search(a, 'in:inbox newer_than:14d', 25) }) }
         catch { out.push({ acct: a.email ?? a.label, label: a.label, mail: [] }) }
       }
       if (!cancelled) { setGroups(out); setLoading(false) }
@@ -226,21 +253,18 @@ function GmailWidget() {
     return () => { cancelled = true }
   }, [])
   return (
-    <Card title="Gmail" action={<span className="font-hud text-[10px] text-white/30 uppercase">unread · 3d</span>}>
-      {loading ? <Hint>loading…</Hint>
-        : groups.length === 0 ? <Hint>No Gmail connected — Settings → Gmail.</Hint>
-        : groups.map(g => (
-          <div key={g.acct} className="mb-2 last:mb-0">
-            <div className="font-hud text-[9.5px] uppercase tracking-wider text-cyan-300/50 mt-1 mb-1">{g.label} · {g.acct}</div>
-            {g.mail.length === 0 ? <div className="text-[11px] text-white/30 py-0.5">no unread</div>
-              : g.mail.map(m => (
-                <div key={m.id} className="py-1.5 border-b border-white/5 last:border-0">
-                  <div className="text-[12.5px] text-white/85 truncate">{m.from.replace(/<.*>/, '').trim()}</div>
-                  <div className="text-[11px] text-white/45 truncate">{m.subject}</div>
-                </div>
-              ))}
-          </div>
-        ))}
+    <Card title="Gmail" action={<button onClick={() => void openWebWindow(WEB_APPS.gmail.label, WEB_APPS.gmail.url, WEB_APPS.gmail.title)} className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200">Open ↗</button>}>
+      <div className="max-h-[440px] overflow-y-auto -mx-1 px-1">
+        {loading ? <Hint>loading inbox…</Hint>
+          : groups.length === 0 ? <Hint>No Gmail connected — Settings → Gmail.</Hint>
+          : groups.map(g => (
+            <div key={g.acct} className="mb-1.5 last:mb-0">
+              <div className="font-hud text-[9.5px] uppercase tracking-wider text-cyan-300/50 sticky top-0 bg-[#0a1120]/80 backdrop-blur-sm py-1.5 z-10">{g.label} · {g.acct}</div>
+              {g.mail.length === 0 ? <div className="text-[11px] text-white/30 py-1">inbox empty (14d)</div>
+                : g.mail.map(m => <MailRow key={m.id} m={m} />)}
+            </div>
+          ))}
+      </div>
     </Card>
   )
 }
@@ -267,18 +291,20 @@ function CodingWidget() {
     return () => { cancelled = true }
   }, [])
   return (
-    <Card title="GitHub — commits, last 7 days" action={<span className="font-hud text-[10px] text-white/30 uppercase">by account</span>}>
-      {loading ? <Hint>loading…</Hint>
-        : rows.length === 0 ? <Hint>No GitHub connected — Settings → GitHub.</Hint>
-        : rows.map(r => (
-          <div key={r.label} className="py-2 border-b border-white/5 last:border-0">
-            <div className="flex items-center justify-between">
-              <span className="text-sm text-white/85">{r.label} <span className="text-white/35 text-xs">@{r.user}</span></span>
-              <span className="text-cyan-300/80 text-xs tabular-nums">{r.total} commits</span>
+    <Card title="GitHub — commits, last 7 days" action={<button onClick={() => void openWebWindow(WEB_APPS.github.label, WEB_APPS.github.url, WEB_APPS.github.title)} className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200">Open ↗</button>}>
+      <div className="max-h-[320px] overflow-y-auto -mx-1 px-1">
+        {loading ? <Hint>loading…</Hint>
+          : rows.length === 0 ? <Hint>No GitHub connected — Settings → GitHub.</Hint>
+          : rows.map(r => (
+            <div key={r.label} className="py-2 border-b border-white/5 last:border-0">
+              <div className="flex items-center justify-between">
+                <span className="text-sm text-white/85">{r.label} <span className="text-white/35 text-xs">@{r.user}</span></span>
+                <span className="text-cyan-300/80 text-xs tabular-nums">{r.total} commits</span>
+              </div>
+              {r.repos.length > 0 && <div className="text-[11px] text-white/45 mt-1 truncate">{r.repos.join('  ·  ')}</div>}
             </div>
-            {r.repos.length > 0 && <div className="text-[11px] text-white/45 mt-1 truncate">{r.repos.join('  ·  ')}</div>}
-          </div>
-        ))}
+          ))}
+      </div>
       <div className="mt-3 pt-2.5 border-t border-white/5 text-[11px] text-white/40 leading-relaxed">
         <span className="text-cyan-300/60">+ Jira</span> — next: thread <span className="text-white/60">work email → ticket → the commits that close it</span>.
       </div>
