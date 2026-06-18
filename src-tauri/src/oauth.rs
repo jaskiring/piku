@@ -3,60 +3,40 @@ use std::net::TcpListener;
 use std::process::Command;
 use std::time::Duration;
 
-// Google's OAuth token endpoint and APIs don't send CORS headers, so a webview `fetch()` to them
-// is blocked. We proxy those calls through curl in Rust (same approach as os_tools::fetch_url),
-// which has no CORS restriction.
+// Desktop OAuth helpers. All three commands are ASYNC and offload their blocking work via
+// spawn_blocking — a plain #[tauri::command] runs on the main thread, so the blocking loopback
+// accept (up to 5 min) or a curl call would freeze the whole UI (and stop other commands like
+// open_path from running). Google's token endpoint + APIs send no CORS headers, so we proxy them
+// through curl in Rust rather than a webview fetch().
+
+/// Listen on 127.0.0.1:port for the OAuth redirect and return the `code` query param.
+#[tauri::command]
+pub async fn oauth_listen(port: u16, timeout_secs: u64) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || oauth_listen_blocking(port, timeout_secs))
+        .await
+        .map_err(|e| e.to_string())?
+}
 
 /// POST application/x-www-form-urlencoded (OAuth token exchange / refresh).
 #[tauri::command]
-pub fn http_post_form(url: String, body: String) -> Result<String, String> {
-    let out = Command::new("curl")
-        .arg("-sS")
-        .arg("--max-time").arg("25")
-        .arg("-X").arg("POST")
-        .arg("-H").arg("Content-Type: application/x-www-form-urlencoded")
-        .arg("--data").arg(&body)
-        .arg(&url)
-        .output()
-        .map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("curl POST failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+pub async fn http_post_form(url: String, body: String) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || post_form_blocking(&url, &body))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
 /// GET with an optional Authorization header (Google APIs, e.g. Gmail).
 #[tauri::command]
-pub fn http_get(url: String, authorization: Option<String>) -> Result<String, String> {
-    let mut cmd = Command::new("curl");
-    cmd.arg("-sS").arg("--max-time").arg("25").arg(&url);
-    if let Some(auth) = authorization {
-        if !auth.is_empty() {
-            cmd.arg("-H").arg(format!("Authorization: {auth}"));
-        }
-    }
-    let out = cmd.output().map_err(|e| e.to_string())?;
-    if !out.status.success() {
-        return Err(format!("curl GET failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
-    }
-    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+pub async fn http_get(url: String, authorization: Option<String>) -> Result<String, String> {
+    tauri::async_runtime::spawn_blocking(move || get_blocking(&url, authorization.as_deref()))
+        .await
+        .map_err(|e| e.to_string())?
 }
 
-// Desktop OAuth loopback catcher. Google's installed-app flow redirects to http://127.0.0.1:PORT
-// with ?code=...; Google deprecated the out-of-band copy/paste flow, so a tiny one-shot local
-// server is the supported way to capture the auth code. We bind the port, accept ONE request,
-// pull `code` out of the query string, serve a small "you can close this" page, and return it.
+// ── blocking implementations (run on the blocking thread pool) ──────────────────
 
-/// Listen on 127.0.0.1:port for the OAuth redirect and return the `code` query param.
-/// Blocks until the redirect arrives or `timeout_secs` elapses with no connection.
-#[tauri::command]
-pub fn oauth_listen(port: u16, timeout_secs: u64) -> Result<String, String> {
+fn oauth_listen_blocking(port: u16, timeout_secs: u64) -> Result<String, String> {
     let listener = TcpListener::bind(("127.0.0.1", port)).map_err(|e| format!("bind {port}: {e}"))?;
-    listener
-        .set_nonblocking(false)
-        .map_err(|e| e.to_string())?;
-
-    // Poll-accept with an overall deadline so a never-completed consent can't hang forever.
     let deadline = std::time::Instant::now() + Duration::from_secs(timeout_secs.max(30));
     listener.set_nonblocking(true).ok();
     let (mut stream, _) = loop {
@@ -78,7 +58,6 @@ pub fn oauth_listen(port: u16, timeout_secs: u64) -> Result<String, String> {
     let n = stream.read(&mut buf).map_err(|e| e.to_string())?;
     let req = String::from_utf8_lossy(&buf[..n]);
 
-    // Request line: `GET /?code=XXX&scope=... HTTP/1.1`
     let target = req.lines().next().and_then(|l| l.split_whitespace().nth(1)).unwrap_or("");
     let query = target.split('?').nth(1).unwrap_or("");
     let mut code: Option<String> = None;
@@ -105,6 +84,36 @@ pub fn oauth_listen(port: u16, timeout_secs: u64) -> Result<String, String> {
         return Err(format!("Google returned an error: {e}"));
     }
     code.filter(|c| !c.is_empty()).ok_or_else(|| "no auth code in the redirect".into())
+}
+
+fn post_form_blocking(url: &str, body: &str) -> Result<String, String> {
+    let out = Command::new("curl")
+        .arg("-sS").arg("--max-time").arg("25")
+        .arg("-X").arg("POST")
+        .arg("-H").arg("Content-Type: application/x-www-form-urlencoded")
+        .arg("--data").arg(body)
+        .arg(url)
+        .output()
+        .map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("curl POST failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
+}
+
+fn get_blocking(url: &str, authorization: Option<&str>) -> Result<String, String> {
+    let mut cmd = Command::new("curl");
+    cmd.arg("-sS").arg("--max-time").arg("25").arg(url);
+    if let Some(auth) = authorization {
+        if !auth.is_empty() {
+            cmd.arg("-H").arg(format!("Authorization: {auth}"));
+        }
+    }
+    let out = cmd.output().map_err(|e| e.to_string())?;
+    if !out.status.success() {
+        return Err(format!("curl GET failed ({:?}): {}", out.status.code(), String::from_utf8_lossy(&out.stderr)));
+    }
+    Ok(String::from_utf8_lossy(&out.stdout).into_owned())
 }
 
 // Minimal percent-decoder (auth codes can contain %2F etc.).
