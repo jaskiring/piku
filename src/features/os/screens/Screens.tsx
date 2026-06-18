@@ -332,8 +332,41 @@ export function PeopleScreen() {
 }
 
 /* ───────────────────────── Settings ───────────────────────── */
-import { accountService, gitHubConnector } from '../../../services/accounts'
+import { accountService, gitHubConnector, connectGoogle, googleConfigured } from '../../../services/accounts'
 import type { ServiceAccount, ServiceType } from '../../../services/accounts'
+
+function GmailCard() {
+  const [accounts, setAccounts] = useState<ServiceAccount[]>([])
+  const [busy, setBusy] = useState(false)
+  const [err, setErr] = useState('')
+  const load = () => { void accountService.getByService('email').then(setAccounts) }
+  useEffect(() => { load() }, [])
+  const connect = async () => {
+    setErr(''); setBusy(true)
+    try {
+      const t = await connectGoogle()
+      const acc = await accountService.create('email', 'Gmail', t.accessToken, { email: t.email })
+      await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
+      load()
+    } catch (e) { setErr(String(e instanceof Error ? e.message : e)) } finally { setBusy(false) }
+  }
+  return (
+    <Card title="Gmail" className="col-span-12 md:col-span-6">
+      {accounts.length === 0
+        ? <p className="text-xs text-white/25 py-2">No Gmail connected.</p>
+        : accounts.map(a => (
+            <div key={a.id} className="flex items-center justify-between py-2 border-b border-white/5 last:border-0">
+              <span className="text-sm text-white/80 flex items-center gap-2"><span className="w-1.5 h-1.5 rounded-full bg-emerald-400" />{a.email ?? a.label}</span>
+              <button onClick={() => void accountService.delete(a.id).then(load)} className="font-hud text-[10px] text-white/25 hover:text-red-300">remove</button>
+            </div>
+          ))}
+      {googleConfigured()
+        ? <button onClick={connect} disabled={busy} className="font-hud text-[10px] text-cyan-300/70 hover:text-cyan-200 border border-cyan-400/20 px-3 py-1.5 mt-2 transition-colors disabled:opacity-40">{busy ? 'connecting…' : '+ Connect Gmail'}</button>
+        : <p className="font-hud text-[10px] text-amber-300/70 mt-2 leading-relaxed">Set VITE_GOOGLE_CLIENT_ID / _SECRET in .env.local (Google Cloud → OAuth client → Desktop app) to enable.</p>}
+      {err && <p className="text-[10px] text-red-400/70 mt-1.5 break-words">{err}</p>}
+    </Card>
+  )
+}
 
 function AccountRow({ account, onDelete }: { account: ServiceAccount; onDelete: () => void }) {
   const [info, setInfo] = useState<{ ok: boolean; repos?: number; name?: string }>({ ok: false })
@@ -451,7 +484,7 @@ export function SettingsScreen() {
 
         {/* Connected accounts — multi-account per service */}
         <ServiceCard service="github" title="GitHub" />
-        <ServiceCard service="email" title="Email" />
+        <GmailCard />
         <ServiceCard service="whatsapp" title="WhatsApp" />
         <ServiceCard service="slack" title="Slack" />
         <ServiceCard service="calendar" title="Calendar" />

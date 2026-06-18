@@ -3,7 +3,7 @@ import type { OllamaTool, OllamaChatMessage } from './OllamaService'
 import { MemoryService } from '../features/memory'
 import type { MemoryCategory } from '../features/memory/types'
 import { logger } from '../lib/logger'
-import { accountService, gitHubConnector } from './accounts'
+import { accountService, gitHubConnector, gmailConnector } from './accounts'
 
 // 2.5-T — Tool / Function Calling foundation.
 // A small, real tool registry + the orchestration loop (call → route → feed results back →
@@ -302,6 +302,36 @@ const TOOLS: Record<string, ToolDef> = {
       return week.total > 0
         ? `No commits pushed yet today. In the last 7 days: ${week.total} commits across ${Object.keys(week.byRepo).length} repo(s) — top: ${fmtRepos(week.byRepo, 6)}.`
         : `No commits today, and none in the last 7 days across ${targets.map(t => t.label).join(' & ')}.`
+    },
+  },
+
+  gmail_check: {
+    needsLlmRound: true,
+    spec: {
+      type: 'function',
+      function: {
+        name: 'gmail_check',
+        description: "Check the user's Gmail. Use for 'any important email', 'unread mail today', 'emails from X', 'what's in my inbox'. Pass a Gmail search query.",
+        parameters: {
+          type: 'object',
+          properties: {
+            query: { type: 'string', description: "Gmail search, e.g. 'is:unread newer_than:1d', 'is:important newer_than:2d', 'from:alice'" },
+          },
+          required: [],
+        },
+      },
+    },
+    run: async (args) => {
+      const accounts = (await accountService.getByService('email')).filter(a => a.enabled)
+      if (!accounts.length) return 'No Gmail connected yet — go to Settings → Gmail and connect.'
+      const q = String(args.query ?? '').trim() || 'is:unread newer_than:1d'
+      const acc = accounts[0]
+      try {
+        const mail = await gmailConnector.search(acc, q, 12)
+        if (!mail.length) return `No emails match "${q}".`
+        return `Gmail (${acc.email ?? acc.label}) for "${q}":\n` +
+          mail.map(m => `• ${m.unread ? '[unread] ' : ''}${m.from.replace(/<.*>/, '').trim()} — ${m.subject}: ${m.snippet.slice(0, 90)}`).join('\n')
+      } catch (e) { return `Couldn't read Gmail: ${String(e)}` }
     },
   },
 }

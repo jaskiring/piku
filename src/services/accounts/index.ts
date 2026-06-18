@@ -1,4 +1,7 @@
 export { AccountService, accountService } from './AccountService'
 export { GitHubConnector, gitHubConnector } from './connectors/GitHubConnector'
+export { GmailConnector, gmailConnector } from './connectors/GmailConnector'
+export type { MailSummary } from './connectors/GmailConnector'
+export { connectGoogle, refreshGoogle, googleConfigured } from './googleOAuth'
 export { seedAccounts } from './init'
 export type { ServiceAccount, ServiceType, ServiceConnector } from './types'

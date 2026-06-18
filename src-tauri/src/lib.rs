@@ -1,5 +1,6 @@
 mod hotkey_manager;
 mod ipc;
+mod oauth;
 mod observer;
 mod os_tools;
 mod tts;
@@ -23,6 +24,7 @@ pub fn run() {
             os_tools::web_headlines,
             tts::piper_speak,
             tts::piper_available,
+            oauth::oauth_listen,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;
