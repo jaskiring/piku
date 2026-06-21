@@ -6,6 +6,8 @@ import { projectService }                from '../../projects/components/Project
 import { WorldModelQueryService }        from '../../worldmodel/WorldModelQueryService'
 import { graphService }                  from '../../graph'
 import { ollamaService }                 from '../../../services/OllamaService'
+import { toolRouter }                    from '../../../services/ToolRouter'
+import { classifyIntent }                from '../../../services/ReasoningPlanner'
 import { logger }                        from '../../../lib/logger'
 import { PIKU_PERSONA }                  from '../../../lib/persona'
 
@@ -20,6 +22,16 @@ const worldModelService = new WorldModelQueryService()
 export const PIKU_SYSTEM_PROMPT = `${PIKU_PERSONA}
 
 You have a continuous memory of this person across conversations — weave in what you know, but don't mention the memory system itself unless they ask.`
+
+// Extended prompt for tool-capable mode: tells the model what tools it has access to.
+// Appended to PIKU_SYSTEM_PROMPT when routing through the ToolRouter.
+const TOOLS_AWARE_SUFFIX = `
+You have real tools you can call: open_app, open_link, web_search, list_files, save_memory,
+recall_memory, get_datetime, github_commits_today, github_list_repos, github_recent_activity,
+gmail_check (read their inbox), calendar_check (what's on their calendar).
+RULE: if they ask you to open, launch, show, play, search, look up, check email/calendar, or get
+headlines, you MUST call the matching tool — pick the tool and fire it, don't deliberate.
+When no action is needed, just talk like yourself.`
 
 interface Options {
   addMessage:             (sender: Sender, text: string) => void
@@ -45,18 +57,23 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
     let streamingPlaceholderAdded = false
 
     setPresenceState('listening')
-    await pause(380)
-    setPresenceState('thinking')
 
     try {
-      // ── Step 1: Retrieve context in parallel ──────────────────────────────
+      // ── Step 1: Retrieve context in parallel with the presence pause ──────
       // worldModelContext replaces the old separate memory + project calls.
       // It aggregates Projects + Decisions + Memories + Graph in one pass,
       // using hybrid retrieval (keyword + semantic + graph traversal).
+      // Start context retrieval immediately so it overlaps with the 120ms pause
+      // (embedding + three source reads typically take 200-500ms).
       const [worldModelContext, summaryContext] = await Promise.all([
         worldModelService.queryForContext(trimmed),
         summaryService.getContext(trimmed),
       ])
+
+      // Minimal presence pause — the rest of the "thinking" dead time is the
+      // actual context retrieval and LLM first-token latency, not fake waiting.
+      await pause(120)
+      setPresenceState('thinking')
 
       logger.chat('context ready', {
         hasWorldModel: worldModelContext.length > 0,
@@ -71,27 +88,55 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
       if (summaryContext)    parts.push(summaryContext)
       const systemContent = parts.join('\n\n')
 
-      // ── Step 3: Call qwen3 (streaming) ───────────────────────────────────
+      // ── Step 3: Route the turn, then call the LLM ────────────────────────
+      // Deterministic intent (zero LLM cost): chores fire a tool immediately, complex asks reason
+      // (think=true), simple chat just replies. Same routing as the Agent screen — one behavior.
+      const intent = classifyIntent(trimmed)
+      const needsTools = intent.kind === 'tool' || intent.kind === 'complex'
+      const think      = intent.kind === 'complex'
+
       addMessage('piku', '')  // streaming placeholder — empty, not persisted
       streamingPlaceholderAdded = true
-      let streamAccumulated   = ''
-      let thinkingAccumulated = ''
-      const { response, latencyMs } = await ollamaService.chatStream(
-        [
-          { role: 'system', content: systemContent },
-          { role: 'user',   content: trimmed        },
-        ],
-        (chunk) => {
-          streamAccumulated += chunk
-          updateLastPikuMessage(streamAccumulated)
-        },
-        (thinkChunk) => {
-          thinkingAccumulated += thinkChunk
-          updateLastPikuThinking(thinkingAccumulated)
-        },
-      )
-      updateLastPikuMessage(response)  // final clean version (thinking tokens fully stripped)
-      logger.chat('response', { chars: response.length, latencyMs })
+
+      let response: string
+      if (needsTools) {
+        // ── Tool path: route through ToolRouter ─────────────────────────────
+        // chatToolRoundStream emits DELTAS → accumulate locally (updateLast* replace in place).
+        const toolSystem = systemContent + '\n\n' + TOOLS_AWARE_SUFFIX
+        let acc = '', thinkAcc = ''
+        const { reply } = await toolRouter.runWithTools(
+          trimmed, toolSystem,
+          (delta) => { thinkAcc += delta; updateLastPikuThinking(thinkAcc) },
+          (delta) => { acc += delta; updateLastPikuMessage(acc) },
+          [],   // no prior history in Home ask bar (each ask is standalone for now)
+          think,
+          (label) => updateLastPikuThinking(label),   // "Checking Gmail…" surfaces while a chore runs
+        )
+        response = reply || '(done)'
+        logger.chat('tool response', { chars: response.length, kind: intent.kind })
+      } else {
+        // ── Plain chat path: fast, no tool overhead ────────────────────────
+        let streamAccumulated   = ''
+        let thinkingAccumulated = ''
+        const result = await ollamaService.chatStream(
+          [
+            { role: 'system', content: systemContent },
+            { role: 'user',   content: trimmed        },
+          ],
+          (chunk) => {
+            streamAccumulated += chunk
+            updateLastPikuMessage(streamAccumulated)
+          },
+          (thinkChunk) => {
+            thinkingAccumulated += thinkChunk
+            updateLastPikuThinking(thinkChunk)
+          },
+        )
+        response = result.response
+        logger.chat('response', { chars: response.length, latencyMs: result.latencyMs })
+      }
+      updateLastPikuMessage(response)  // final clean version
+      logger.chat('response', { chars: response.length })
 
       // ── Step 4: Display ───────────────────────────────────────────────────
       setPresenceState('idle')

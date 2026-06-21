@@ -10,7 +10,7 @@ import { voiceService } from '../../../services/VoiceService'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import { agentHub } from './agentSession'
 import { PIKU_PERSONA } from '../../../lib/persona'
-import { planReasoning } from '../../../services/ReasoningPlanner'
+import { planReasoning, classifyIntent } from '../../../services/ReasoningPlanner'
 import type { ReasoningFlow } from '../../../services/ReasoningPlanner'
 
 const AGENT_SYSTEM_PROMPT = `${PIKU_PERSONA}
@@ -18,13 +18,16 @@ const AGENT_SYSTEM_PROMPT = `${PIKU_PERSONA}
 You're also in agent mode right now: running on this person's Mac, with real tools you can call —
 open_app (open/focus an app), open_link (open a URL/file/folder), web_search (open a web search in
 the browser; pass app "Google Chrome"), list_files (a folder under their home), save_memory /
-recall_memory / get_datetime, and GitHub — github_commits_today (what they shipped today/this week,
-across both accounts), github_list_repos, github_recent_activity. For "what did I commit/ship
-today" use github_commits_today.
+recall_memory / get_datetime, GitHub — github_commits_today (what they shipped today/this week,
+across both accounts), github_list_repos, github_recent_activity, Gmail — gmail_check (read their
+inbox; supports a Gmail query), and Calendar — calendar_check (what's on their calendar today / this
+week). For "what did I commit/ship today" use github_commits_today. For "what's on my calendar" or
+"do I have meetings" use calendar_check. For "any important email" use gmail_check.
 RULE: if they ask you to open, launch, show, play, search, look up, or get headlines, you MUST call
 the matching tool — never claim you did it without actually calling it, and don't over-deliberate:
 pick the tool and fire it. web_search opens the search AND returns the top results — read them and
-tell the actual answer in a line or two. You can't delete files or run arbitrary commands. When no
+give the actual answer in full, complete and unabbreviated (not "a line or two" — however much
+detail the question needs). You can't delete files or run arbitrary commands. When no
 action is needed, just talk like yourself.`
 
 const SUGGESTIONS = ['Open Safari', "What's in my Documents?", 'Open github.com', 'What time is it?']
@@ -54,6 +57,7 @@ export function AgentScreen() {
   const [phase, setPhase]               = useState<PresenceState>('idle')
   const [liveThinking, setLiveThinking] = useState('')
   const [liveAnswer, setLiveAnswer]     = useState('')   // the reply, streaming in token-by-token
+  const [liveStatus, setLiveStatus]     = useState('')   // live "Checking Gmail…" while a chore runs
   const [flow, setFlow]                 = useState<ReasoningFlow | null>(null)   // understand→plan for complex asks
   const [voiceOut, setVoiceOut]         = useState(true)
   const [projects, setProjects]         = useState<Project[]>([])
@@ -64,7 +68,6 @@ export function AgentScreen() {
   const inputRef = useRef<HTMLInputElement>(null)
   const convEnd  = useRef<HTMLDivElement>(null)
   const traceEnd = useRef<HTMLDivElement>(null)
-  const debounce = useRef<ReturnType<typeof setTimeout> | undefined>(undefined)
   const isTauri  = typeof window !== 'undefined' && '__TAURI_INTERNALS__' in window
 
   const loadProjects = () => { void projectService.getAllProjects().then(setProjects).catch(() => {}) }
@@ -78,37 +81,43 @@ export function AgentScreen() {
   const run = async (text: string) => {
     const t = text.trim()
     if (!t || running) return
-    clearTimeout(debounce.current)
     voiceService.prime()
     setInput('')
     const history = agentHub.active()?.turns ?? []   // prior turns — Piku remembers this context
     agentHub.addTurn({ role: 'you', text: t })
     agentHub.setTrace([])
-    setLiveThinking(''); setLiveAnswer(''); setFlow(null)
+    setLiveThinking(''); setLiveAnswer(''); setLiveStatus(''); setFlow(null)
     setRunning(true); setPhase('thinking')
     try {
-      // Plan first: simple asks go straight to the answer; complex asks get understand→plan graphs.
-      const f = await planReasoning(t).catch(() => ({ simple: true }) as ReasoningFlow)
-      if (!f.simple) setFlow(f)
+      // Route once, deterministically: chores act now (no graph), complex asks reason (graph),
+      // simple chat just replies. think=true ONLY for complex → big latency cut on the 4b model.
+      const intent = classifyIntent(t)
+      const isComplex = intent.kind === 'complex'
+      if (isComplex) {
+        // Show the graph the INSTANT a complex turn starts (placeholder), then fill it from the
+        // planner async — so the right panel is never an empty box during the 10–30s reasoning.
+        setFlow({ simple: false, understand: ['Understanding the problem…'], plan: ['Working out the steps…'] })
+        void planReasoning(t).then(f => { if (!f.simple) setFlow(f) }).catch(() => {})
+      }
       const { reply, trace: tr } = await toolRouter.runWithTools(
         t, AGENT_SYSTEM_PROMPT,
         d => setLiveThinking(p => p + d),
-        d => { setPhase('listening'); setLiveAnswer(p => p + d) },   // answer streams live → no dead gap
+        d => { setPhase('listening'); setLiveStatus(''); setLiveAnswer(p => p + d) },   // answer streams live → no dead gap
         history,
+        isComplex,                       // think = true only for complex asks
+        label => { setLiveStatus(label); setPhase('listening') },   // "Checking Gmail…" the moment a tool fires
       )
       agentHub.setTrace(tr)
       agentHub.addTurn({ role: 'piku', text: reply || '(done)' })
       if (voiceOut) voiceService.speak(reply)
     } catch (e) {
       agentHub.addTurn({ role: 'piku', text: `Something went wrong: ${String(e)}` })
-    } finally { setRunning(false); setPhase('idle'); setLiveThinking(''); setLiveAnswer('') }
+    } finally { setRunning(false); setPhase('idle'); setLiveThinking(''); setLiveAnswer(''); setLiveStatus('') }
   }
 
-  const onInputChange = (v: string) => {
-    setInput(v)
-    clearTimeout(debounce.current)
-    if (v.trim() && !running) debounce.current = setTimeout(() => run(v), 2200)
-  }
+  // Type freely — send only on Enter / the send button / a final voice transcript. (No auto-submit:
+  // the old 2.2s idle-timer fired messages by itself mid-typing.)
+  const onInputChange = (v: string) => setInput(v)
 
   const commitTitle = () => { if (ctx) agentHub.rename(ctx.id, titleDraft); setEditingTitle(false) }
 
@@ -245,7 +254,14 @@ export function AgentScreen() {
                   {/* live reply — streams in token-by-token so there's no dead loading gap */}
                   {running && (liveAnswer
                     ? <div className="flex justify-start"><div className="max-w-[85%] text-[14px] leading-relaxed text-white/85 whitespace-pre-wrap">{liveAnswer}<span className="animate-blink text-cyan-300 ml-0.5">▋</span></div></div>
-                    : <div className="flex justify-start"><div className="flex items-center gap-1 text-cyan-300/60 px-1"><span className="w-1.5 h-1.5 rounded-full bg-cyan-400/70 animate-pulse" /><span className="w-1.5 h-1.5 rounded-full bg-cyan-400/50 animate-pulse [animation-delay:150ms]" /><span className="w-1.5 h-1.5 rounded-full bg-cyan-400/40 animate-pulse [animation-delay:300ms]" /></div></div>
+                    : <div className="flex justify-start"><div className="flex items-center gap-2 text-cyan-300/70 px-1">
+                        <span className="flex items-center gap-1">
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/70 animate-pulse" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/50 animate-pulse [animation-delay:150ms]" />
+                          <span className="w-1.5 h-1.5 rounded-full bg-cyan-400/40 animate-pulse [animation-delay:300ms]" />
+                        </span>
+                        <span className="text-[12.5px] text-cyan-100/65">{liveStatus || 'thinking…'}</span>
+                      </div></div>
                   )}
                   <div ref={convEnd} />
                 </div>

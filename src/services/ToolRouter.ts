@@ -3,7 +3,7 @@ import type { OllamaTool, OllamaChatMessage } from './OllamaService'
 import { MemoryService } from '../features/memory'
 import type { MemoryCategory } from '../features/memory/types'
 import { logger } from '../lib/logger'
-import { accountService, gitHubConnector, gmailConnector } from './accounts'
+import { accountService, gitHubConnector, gmailConnector, calendarConnector } from './accounts'
 
 // 2.5-T — Tool / Function Calling foundation.
 // A small, real tool registry + the orchestration loop (call → route → feed results back →
@@ -342,10 +342,75 @@ const TOOLS: Record<string, ToolDef> = {
       return `Gmail for "${q}":\n\n` + blocks.join('\n\n')
     },
   },
+
+  calendar_check: {
+    needsLlmRound: true,
+    spec: {
+      type: 'function',
+      function: {
+        name: 'calendar_check',
+        description: "Check the user's upcoming Google Calendar events across all connected accounts. Use for 'what's on my calendar', 'do I have meetings today', 'what's next'. Optionally look further ahead with days.",
+        parameters: {
+          type: 'object',
+          properties: {
+            days:    { type: 'number', description: "How many days ahead to look. Default 1 (today). Use 7 for the week." },
+            account: { type: 'string', description: "Optional: which account — a label or email keyword like 'work' or 'personal'. Omit to check all." },
+          },
+          required: [],
+        },
+      },
+    },
+    run: async (args) => {
+      const all = (await accountService.getByService('calendar')).filter(a => a.enabled && a.token)
+      if (!all.length) return 'No Google Calendar connected yet — go to Settings → Calendar and connect.'
+      const sel = String(args.account ?? '').trim().toLowerCase()
+      const matched = sel ? all.filter(a => a.label.toLowerCase().includes(sel) || (a.email ?? '').toLowerCase().includes(sel)) : []
+      const targets = matched.length ? matched : all
+      const days = Number(args.days ?? 1)
+      const now = new Date()
+      const horizon = new Date(now.getTime() + Math.max(1, days) * 864e5)
+      const blocks: string[] = []
+      for (const acc of targets) {
+        const who = acc.email ?? acc.label
+        try {
+          const evs = await calendarConnector.list(acc, now.toISOString(), horizon.toISOString(), 20)
+          blocks.push(evs.length
+            ? `${who} (${acc.label}) — next ${days}d:\n` + evs.map(e => {
+                const when = new Date(e.start).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })
+                const loc = e.location ? ` @ ${e.location}` : ''
+                const meet = e.meetLink ? ` (meet: ${e.meetLink})` : ''
+                return `• ${when} — ${e.title}${loc}${meet}`
+              }).join('\n')
+            : `${who} (${acc.label}): nothing on the calendar for the next ${days} day(s).`)
+        } catch (e) { blocks.push(`${who}: couldn't read calendar (${String(e)})`) }
+      }
+      return `Calendar (next ${days}d):\n\n` + blocks.join('\n\n')
+    },
+  },
 }
 
 export interface TraceStep { kind: 'thinking' | 'tool' | 'result' | 'answer'; text: string }
 export interface AgentRun { reply: string; usedTools: string[]; trace: TraceStep[] }
+
+// A short human-facing status shown the instant a tool fires ("Checking Gmail…"), so the UI is
+// never a dead spinner while a chore runs. Distinct from the raw trace (which logs the call + result).
+function toolStatusLabel(name: string, args: Record<string, unknown>): string {
+  switch (name) {
+    case 'open_app':              return `Opening ${String(args.app ?? 'app')}…`
+    case 'open_link':             return `Opening ${String(args.target ?? 'link')}…`
+    case 'list_files':            return `Listing ${String(args.path ?? 'home') || 'home'}…`
+    case 'web_search':            return `Searching "${String(args.query ?? '').slice(0, 40)}"…`
+    case 'gmail_check':           return 'Checking Gmail…'
+    case 'calendar_check':        return 'Checking your calendar…'
+    case 'github_commits_today':  return "Checking today's commits…"
+    case 'github_list_repos':     return 'Listing GitHub repos…'
+    case 'github_recent_activity':return 'Checking GitHub activity…'
+    case 'recall_memory':         return 'Recalling what I know…'
+    case 'save_memory':           return 'Saving that to memory…'
+    case 'get_datetime':          return 'Checking the time…'
+    default:                      return `Running ${name}…`
+  }
+}
 
 class ToolRouter {
   readonly tools: OllamaTool[] = Object.values(TOOLS).map(t => t.spec)
@@ -359,6 +424,8 @@ class ToolRouter {
     onThinking?: (delta: string) => void,
     onContent?: (delta: string) => void,
     history: { role: 'you' | 'piku'; text: string }[] = [],
+    think = true,   // false on simple turns → skip reasoning, big latency cut on a 4b model
+    onStatus?: (label: string) => void,   // live "Checking Gmail…" the moment a tool fires
   ): Promise<AgentRun> {
     const trace: TraceStep[] = []
     const messages: OllamaChatMessage[] = [
@@ -368,7 +435,8 @@ class ToolRouter {
       { role: 'user', content: userMessage },
     ]
 
-    const first = await ollamaService.chatToolRoundStream(messages, this.tools, onThinking, onContent)
+    const first = await ollamaService.chatToolRoundStream(messages, this.tools, onThinking, onContent,
+      undefined, undefined, think)
     if (first.thinking) trace.push({ kind: 'thinking', text: first.thinking })
 
     if (!first.toolCalls.length) {
@@ -394,13 +462,17 @@ class ToolRouter {
       if (!def) {
         result = `Unknown tool: ${name}`
       } else {
+        onStatus?.(toolStatusLabel(name, args))   // show "Checking Gmail…" the instant it fires
         try {
           result = await def.run(args)
         } catch (err) {
           result = `Tool ${name} failed: ${String(err)}`
           logger.error('tool failed', { name, error: String(err) })
         }
-        if (def.needsLlmRound) anyNeedsRound = true
+        // A 2nd LLM round (interpret the result) only when we're in reasoning mode. In chore mode
+        // (think=false) the tool's already-formatted output IS the reply → returns instantly, no
+        // extra forward pass. Owner's call: "just get the data and show it; reason about it later."
+        if (def.needsLlmRound && think) anyNeedsRound = true
         else readyOutputs.push(result)
       }
       trace.push({ kind: 'result', text: result })
@@ -415,7 +487,8 @@ class ToolRouter {
     }
 
     // A tool needs interpretation (e.g. recall_memory) → let the model compose the reply (streamed).
-    const second = await ollamaService.chatToolRoundStream(messages, this.tools, onThinking, onContent)
+    const second = await ollamaService.chatToolRoundStream(messages, this.tools, onThinking, onContent,
+      undefined, undefined, think)
     if (second.thinking) trace.push({ kind: 'thinking', text: second.thinking })
     let reply = second.content.trim()
     if (!reply) reply = await this.answerDirectly(messages, onContent)
