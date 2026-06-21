@@ -69,6 +69,8 @@ export function AgentScreen() {
   const [projMenu, setProjMenu]         = useState(false)
   const [editingProj, setEditingProj]   = useState(false)
   const [projDraft, setProjDraft]       = useState('')
+  const [renamingId, setRenamingId]     = useState<string | null>(null)   // rail project rename
+  const [renameDraft, setRenameDraft]   = useState('')
 
   const inputRef = useRef<HTMLInputElement>(null)
   const convEnd  = useRef<HTMLDivElement>(null)
@@ -91,9 +93,12 @@ export function AgentScreen() {
     try {
       if (await opencodeProvider.ensureServer()) {
         setPhase('thinking')
-        const reply = await opencodeProvider.chat(system, msg, history, t => setLiveThinking(p => p + t))
+        let captured = ''
+        const reply = await opencodeProvider.chat(system, msg, history, t => { captured += t; setLiveThinking(p => p + t) })
         if (reply) {
           setLiveAnswer(reply)
+          // Persist the reasoning so it stays visible in the ACT panel after the turn finishes.
+          agentHub.setTrace(captured.trim() ? [{ kind: 'thinking', text: captured.trim() }] : [])
           agentHub.addTurn({ role: 'piku', text: reply })
           if (voiceOut) voiceService.speak(reply)
           return
@@ -186,6 +191,13 @@ export function AgentScreen() {
     setEditingProj(false)
   }
 
+  // Rename a project straight from the Sessions rail.
+  const commitRename = async () => {
+    const id = renamingId, name = renameDraft.trim()
+    if (id && name) { await projectService.updateProject(id, { name }).catch(() => {}); loadProjects() }
+    setRenamingId(null)
+  }
+
   const createProjectFromContext = async () => {
     if (!ctx) return
     // Never leave a project nameless: prefer the session title, then its first message, then a
@@ -229,14 +241,22 @@ export function AgentScreen() {
                 {projects.map(p => {
                   const n = contexts.filter(c => c.projectId === p.id).length
                   return (
-                    <button key={p.id} onClick={() => { agentHub.createContext(); agentHub.linkProject(p.id) }}
-                      title={`New session in ${p.name}`}
-                      className="group/p w-full flex items-center gap-2 px-2.5 py-1.5 text-left hover:bg-fuchsia-500/[0.06] transition-colors">
+                    <div key={p.id} className="group/p flex items-center gap-2 px-2.5 py-1.5 hover:bg-fuchsia-500/[0.06] transition-colors">
                       <span className="text-fuchsia-300/70 text-[10px] shrink-0">◆</span>
-                      <span className="flex-1 min-w-0 text-[12px] text-white/70 truncate group-hover/p:text-white/90">{p.name}</span>
-                      {n > 0 && <span className="font-hud text-[8.5px] text-white/30">{n}</span>}
-                      <span className="font-hud text-[10px] text-transparent group-hover/p:text-fuchsia-200/80 transition-colors">＋</span>
-                    </button>
+                      {renamingId === p.id ? (
+                        <input autoFocus value={renameDraft} onChange={e => setRenameDraft(e.target.value)}
+                          onBlur={commitRename}
+                          onKeyDown={e => { if (e.key === 'Enter') commitRename(); if (e.key === 'Escape') setRenamingId(null) }}
+                          className="flex-1 min-w-0 bg-transparent text-[12px] text-white/90 border-b border-fuchsia-400/40 outline-none" />
+                      ) : (
+                        <button onClick={() => { agentHub.createContext(); agentHub.linkProject(p.id) }}
+                          title={`New session in ${p.name}`}
+                          className="flex-1 min-w-0 text-left text-[12px] text-white/70 truncate group-hover/p:text-white/90">{p.name}</button>
+                      )}
+                      {n > 0 && renamingId !== p.id && <span className="font-hud text-[8.5px] text-white/30">{n}</span>}
+                      <button onClick={() => { setRenameDraft(p.name); setRenamingId(p.id) }} title="Rename project"
+                        className="font-hud text-[10px] text-transparent group-hover/p:text-white/40 hover:!text-fuchsia-200 transition-colors">✎</button>
+                    </div>
                   )
                 })}
               </div>
