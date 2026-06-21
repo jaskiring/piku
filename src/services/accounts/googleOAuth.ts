@@ -1,13 +1,18 @@
-// Google OAuth (installed-app / loopback flow) for Gmail. The Rust `oauth_listen` command catches
-// the redirect on 127.0.0.1; token exchange + userinfo go through Rust curl (`http_post_form` /
-// `http_get`) because Google's endpoints don't send CORS headers, so a webview fetch() is blocked.
-// Client id/secret come from .env.local (gitignored). Google deprecated the OOB copy/paste flow.
+// Google OAuth (installed-app / loopback flow) for Gmail + Calendar. The Rust `oauth_listen`
+// command catches the redirect on 127.0.0.1; token exchange + userinfo go through Rust curl
+// (`http_post_form` / `http_get`) because Google's endpoints don't send CORS headers, so a webview
+// fetch() is blocked. Client id/secret come from .env.local (gitignored). Google deprecated the
+// OOB copy/paste flow.
+//
+// One consent flow grants BOTH Gmail and Calendar scopes — a single Google account row carries the
+// token that GmailConnector and CalendarConnector both refresh via refreshGoogle().
 
 const PORT = 8731
 const REDIRECT = `http://127.0.0.1:${PORT}`
 const SCOPES = [
   'https://www.googleapis.com/auth/gmail.readonly',
   'https://www.googleapis.com/auth/gmail.send',
+  'https://www.googleapis.com/auth/calendar.readonly',   // INT-1: Calendar on top of Gmail
   'https://www.googleapis.com/auth/userinfo.email',
 ]
 

@@ -14,6 +14,7 @@ import { GraphCanvas }                        from '../graph/components/GraphCan
 import { SCREENS }                            from './screens/Screens'
 import { ImmersiveChat }                      from '../chat/components/ImmersiveChat'
 import { seedAccounts }                       from '../../services/accounts/init'
+import { connectorFeed }                      from '../../services/accounts/ConnectorFeed'
 
 // The Piku OS shell: sidebar + view + dock over a neural field. The "Ask piku" bar opens an
 // immersive full-screen conversation (ImmersiveChat). The graph lives in the Knowledge view.
@@ -50,6 +51,7 @@ export function Shell() {
       }
     })()
     void seedAccounts()
+    connectorFeed.startAutoRefresh()   // shared connector cache refreshes every 5 min
   }, [])
 
   const [voiceOn, setVoiceOn]     = useState(true)   // Piku speaks replies by default

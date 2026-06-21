@@ -9,7 +9,9 @@ const EXTRACTION_TIMEOUT = 300_000  // 5 min — for document/conversation extra
 const EMBED_TIMEOUT      =  15_000
 const NUM_CTX            = 8192     // cap context per request → smaller KV cache, snappy on 16GB
                                     // (Piku is retrieval-augmented, so it never needs a huge window)
-const CHAT_NUM_PREDICT   = 2048     // runaway guard for interactive replies (thinking + answer)
+const CHAT_NUM_PREDICT   = 3072     // runaway guard for interactive replies (thinking + answer)
+                                    // Raised from 2048: thinking tokens ate into the budget on long replies.
+                                    // 3072 gives the model room for both reasoning and full detailed answers.
 const EXTRACT_NUM_PREDICT = 1024    // background extraction: short JSON only → keep it cheap & fast
 
 // 2.5-PERF — keep the model resident between turns so back-to-back messages skip the
@@ -101,6 +103,16 @@ class OllamaService {
   // Warm the embedding model too (memory/graph retrieval uses it on the first turn).
   async warmupEmbed(): Promise<void> {
     try { await this.embed('warmup') } catch { /* non-fatal */ }
+  }
+
+  /** List locally available model names (from /api/tags). */
+  async listModels(): Promise<string[]> {
+    try {
+      const res = await fetch(`${OLLAMA_BASE}/api/tags`, { signal: AbortSignal.timeout(5_000) })
+      if (!res.ok) return []
+      const data = await res.json() as { models?: { name: string }[] }
+      return (data.models ?? []).map(m => m.name)
+    } catch { return [] }
   }
 
   // ── Chat ──────────────────────────────────────────────────────────────────

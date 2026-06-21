@@ -5,6 +5,7 @@ mod observer;
 mod os_tools;
 mod tts;
 mod tray_manager;
+mod webembed;
 mod webwin;
 mod window_manager;
 
@@ -29,6 +30,10 @@ pub fn run() {
             oauth::http_post_form,
             oauth::http_get,
             webwin::open_web_window,
+            webembed::embed_panel,
+            webembed::reposition_embed,
+            webembed::hide_embed,
+            webembed::hide_all_embeds,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;

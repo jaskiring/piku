@@ -5,6 +5,7 @@ import { Orb } from '../orb'
 import { projectService } from '../projects/components/ProjectDashboard'
 import { graphService } from '../graph'
 import { ollamaService, ACTIVE_BRAIN } from '../../services/OllamaService'
+import { useConnectorFeed } from '../../services/accounts/ConnectorFeed'
 import { HudPanel, HudChip, chamfer } from './Hud'
 
 // HomeOS — the functional home as a premium cyberpunk HUD. Real content (ask bar, projects,
@@ -34,6 +35,7 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
   const [nodeCount, setNodeCount] = useState<number | null>(null)
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
+  const feed = useConnectorFeed()   // shared connector cache — Gmail + GitHub (calendar TBD)
 
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id) }, [])
 
@@ -153,14 +155,54 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
             </button>
           </HudPanel>
 
-          <HudPanel className="col-span-6 md:col-span-2" label="Today" code="04">
-            <div className="text-[18px] text-white/85 leading-none">{now.toLocaleDateString(undefined, { weekday: 'long' })}</div>
-            <div className="font-hud text-[11px] uppercase tracking-wider text-white/40 mt-1.5 mb-3.5">{now.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</div>
-            <button onClick={() => onNavigate('calendar')}
-              className="font-hud text-[10.5px] uppercase tracking-wider text-white/40 hover:text-cyan-200 transition-colors">+ Connect calendar</button>
+          {/* Live daily briefing — connector data from the shared store */}
+          <HudPanel className="col-span-6 md:col-span-3" label="Inbox" code="04"
+            action={feed.inbox && feed.inbox.messages.length > 0 ? <LinkBtn onClick={() => onNavigate('apps')}>Open</LinkBtn> : undefined}>
+            {feed.loading && !feed.inbox ? (
+              <div className="font-hud text-[11px] text-white/35 py-2">SYNCING INBOX…</div>
+            ) : !feed.inbox || feed.inbox.messages.length === 0 ? (
+              <div className="font-hud text-[11px] text-white/35 leading-relaxed py-1">
+                {feed.inbox ? 'NO UNREAD — inbox zero.' : 'CONNECT GMAIL IN SETTINGS →'}
+              </div>
+            ) : (
+              <div className="flex flex-col -mx-1">
+                {(feed.inbox.messages).slice(0, 4).map((m, i) => (
+                  <button key={m.id} onClick={() => onNavigate('apps')}
+                    className="group/row flex items-center gap-2.5 px-1 py-1.5 hover:bg-cyan-500/[0.05] transition-colors text-left">
+                    <span className="font-hud text-[9px] text-cyan-300/50 w-4">{String(i + 1).padStart(2, '0')}</span>
+                    {m.unread && <span className="w-1.5 h-1.5 bg-cyan-400 shrink-0 shadow-[0_0_6px_rgba(34,211,238,0.7)]" />}
+                    <span className="flex-1 min-w-0">
+                      <span className={`block text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/55'}`}>{m.subject}</span>
+                      <span className="block font-hud text-[9px] text-white/35 truncate">{m.from.replace(/<[^>]*>/, '').trim()}</span>
+                    </span>
+                  </button>
+                ))}
+              </div>
+            )}
           </HudPanel>
 
-          <HudPanel className="col-span-6 md:col-span-2" label="System" code="05">
+          <HudPanel className="col-span-6 md:col-span-2" label="Today" code="05"
+            action={<LinkBtn onClick={() => onNavigate('calendar')}>Cal</LinkBtn>}>
+            <div className="text-[18px] text-white/85 leading-none">{now.toLocaleDateString(undefined, { weekday: 'long' })}</div>
+            <div className="font-hud text-[11px] uppercase tracking-wider text-white/40 mt-1.5 mb-3">{now.toLocaleDateString(undefined, { month: 'long', day: 'numeric' })}</div>
+            <div className="flex flex-col gap-2 font-hud text-[10.5px]">
+              {feed.commits ? (
+                <button onClick={() => onNavigate('apps')} className="flex items-center justify-between text-left hover:text-cyan-200 transition-colors">
+                  <span className="text-white/45 uppercase tracking-wider">Shipped</span>
+                  <span className={feed.commits.total > 0 ? 'text-cyan-200/85' : 'text-white/35'}>{feed.commits.total} commits</span>
+                </button>
+              ) : (
+                <div className="flex items-center justify-between">
+                  <span className="text-white/45 uppercase tracking-wider">Shipped</span>
+                  <span className="text-white/30">{feed.loading ? '…' : '—'}</span>
+                </div>
+              )}
+              <button onClick={() => onNavigate('calendar')}
+                className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 hover:text-cyan-200 transition-colors text-left">+ Connect calendar</button>
+            </div>
+          </HudPanel>
+
+          <HudPanel className="col-span-6 md:col-span-2" label="System" code="06">
             <div className="flex flex-col gap-2.5 font-hud text-[11px]">
               <Stat label="Ollama" value={ollamaUp === null ? 'checking' : ollamaUp ? 'online' : 'offline'} dim={ollamaUp === false} />
               <Stat label="Brain" value={ACTIVE_BRAIN.model} />
@@ -175,6 +217,12 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
           <Tick dot="bg-fuchsia-400" >Agent idle</Tick>
           <Tick dot="bg-cyan-400">Memory synced</Tick>
           <Tick dot="bg-cyan-400">{nodeCount ?? 0} nodes indexed</Tick>
+          {feed.inbox && feed.inbox.messages.filter(m => m.unread).length > 0 && (
+            <Tick dot="bg-cyan-400">{feed.inbox.messages.filter(m => m.unread).length} unread</Tick>
+          )}
+          {feed.commits && feed.commits.total > 0 && (
+            <Tick dot="bg-emerald-400">{feed.commits.total} shipped today</Tick>
+          )}
           <Tick dot={ollamaUp === false ? 'bg-amber-400' : 'bg-emerald-400'}>{ollamaUp === false ? 'Ollama offline' : 'Ollama online'}</Tick>
         </div>
 

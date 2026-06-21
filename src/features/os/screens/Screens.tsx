@@ -1,12 +1,12 @@
-import { useEffect, useState } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { ReactNode, FC } from 'react'
 import { Card } from '../Card'
 import type { NavKey } from '../Sidebar'
 import { ScreenShell, BuildStatus, Hint } from './ScreenShell'
 import { projectService } from '../../projects/components/ProjectDashboard'
-import { activeAppObserver } from '../../../services/ActiveAppObserver'
-import type { ObserverState } from '../../../services/ActiveAppObserver'
 import { AgentScreen } from './AgentScreen'
+import { CanvasScreen } from './Canvas'
+import { PlaygroundScreen } from './Playground'
 
 const AddBtn = ({ label }: { label: string }) => (
   <button className="text-[12px] text-cyan-200 bg-cyan-500/12 hover:bg-cyan-500/20 border border-cyan-400/20 rounded-xl px-3 py-1.5 transition-colors">{label}</button>
@@ -153,59 +153,83 @@ export function DatasetsScreen() {
 
 /* ───────────────────────── Apps — comms + coding dashboard ───────────────────────── */
 
+const NOTCH8 = 'polygon(0 0, calc(100% - 8px) 0, 100% 8px, 100% 100%, 8px 100%, 0 calc(100% - 8px))'
+const COMMS = [
+  { key: 'whatsapp', label: 'wa', name: 'WhatsApp', url: 'https://web.whatsapp.com' },
+  { key: 'linkedin', label: 'li', name: 'LinkedIn', url: 'https://www.linkedin.com/feed/' },
+  { key: 'gmail',    label: 'gm', name: 'Gmail',    url: '' },
+] as const
+type CommsKey = typeof COMMS[number]['key']
+
+// Apps = communications, embedded INSIDE Piku. WhatsApp/LinkedIn render as a real native web panel
+// (Tauri multi-webview) positioned over the region below; Gmail is the native client.
 export function AppsScreen() {
-  const [obs, setObs] = useState<ObserverState | null>(null)
-  useEffect(() => { activeAppObserver.start(); return activeAppObserver.subscribe(setObs) }, [])
+  const [tab, setTab] = useState<CommsKey>('whatsapp')
+  const region = useRef<HTMLDivElement>(null)
+  const active = COMMS.find(c => c.key === tab)!
+
+  useEffect(() => {
+    if (tab === 'gmail') { void hideAllEmbeds(); return }
+    const id = window.setTimeout(() => {
+      const el = region.current; if (!el) return
+      const r = el.getBoundingClientRect()
+      void embedPanel(active.label, active.url, r)
+    }, 70)
+    const onResize = () => {
+      const el = region.current; if (!el) return
+      void repositionEmbed(active.label, el.getBoundingClientRect())
+    }
+    window.addEventListener('resize', onResize)
+    return () => { window.clearTimeout(id); window.removeEventListener('resize', onResize) }
+  }, [tab, active.label, active.url])
+
+  useEffect(() => () => { void hideAllEmbeds() }, [])   // hide panels when leaving Apps
 
   return (
-    <ScreenShell title="Apps" subtitle="Your services in one place — comms on the left, your coding world on the right.">
-      <div className="grid grid-cols-12 gap-4">
-        {/* ── COMMS ── */}
-        <div className="col-span-12 lg:col-span-5 flex flex-col gap-4">
-          <SectionLabel>Comms</SectionLabel>
-          <GmailWidget />
-          <div className="grid grid-cols-2 gap-4">
-            <LaunchTile app="whatsapp" name="WhatsApp" desc="Chats · scan QR once" />
-            <LaunchTile app="linkedin" name="LinkedIn" desc="Feed · messages" />
-          </div>
+    <div className="h-full flex flex-col px-6 pt-6 pb-24">
+      <div className="flex items-end justify-between mb-4 gap-4">
+        <div>
+          <h1 className="text-2xl font-semibold tracking-tight text-white/95">Apps</h1>
+          <p className="text-white/45 mt-1 text-sm">Your communication — all inside Piku.</p>
         </div>
-
-        {/* ── CODING ── */}
-        <div className="col-span-12 lg:col-span-7 flex flex-col gap-4">
-          <SectionLabel>Coding</SectionLabel>
-          <CodingWidget />
-          {/* live focus, kept compact */}
-          <Card title="Now" action={<span className="text-[10px] flex items-center gap-1.5"><span className={`w-1.5 h-1.5 rounded-full ${obs?.observing ? 'bg-cyan-400 animate-pulse' : 'bg-white/30'}`} /><span className={obs?.observing ? 'text-cyan-300/80' : 'text-white/40'}>{obs?.observing ? 'observing' : 'idle'}</span></span>}>
-            <div className="text-sm text-white/85 truncate">{obs?.current?.app || '—'}</div>
-            {obs?.current?.title && <div className="text-[11px] text-white/40 truncate">{obs.current.title}</div>}
-          </Card>
+        <div className="flex items-center gap-1 font-hud text-[11px] uppercase tracking-wider">
+          {COMMS.map(c => (
+            <button key={c.key} onClick={() => setTab(c.key)}
+              className={`px-3.5 py-1.5 transition-colors ${tab === c.key ? 'text-cyan-100' : 'text-white/40 hover:text-white/70'}`}
+              style={tab === c.key ? { clipPath: NOTCH8, background: 'rgba(34,211,238,0.12)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.3)' } : undefined}>{c.name}</button>
+          ))}
         </div>
       </div>
-      <BuildStatus items={[
-        { label: 'Gmail + GitHub live widgets', state: 'built' },
-        { label: 'WhatsApp / LinkedIn windows', state: 'built' },
-        { label: 'Jira connector → email↔ticket↔commit flow', state: 'planned' },
-        { label: 'Google Calendar (both accounts)', state: 'planned' },
-      ]} />
-    </ScreenShell>
+      <div className="flex-1 min-h-0 relative bg-[#070b14]/60" style={{ boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.14)' }}>
+        {tab === 'gmail'
+          ? <div className="absolute inset-0 overflow-y-auto p-4"><GmailWidget /></div>
+          : <div ref={region} className="absolute inset-0">
+              <div className="absolute inset-0 flex items-center justify-center text-white/25 font-hud text-xs uppercase tracking-[0.3em] pointer-events-none">loading {active.name}…</div>
+            </div>}
+      </div>
+    </div>
   )
 }
 
-function SectionLabel({ children }: { children: ReactNode }) {
-  return <div className="font-hud text-[10px] uppercase tracking-[0.28em] text-cyan-300/50 px-1">{children}</div>
-}
-
-function LaunchTile({ app, name, desc }: { app: 'whatsapp' | 'linkedin'; name: string; desc: string }) {
-  const a = WEB_APPS[app]
+export function WorkScreen() {
   return (
-    <button onClick={() => void openWebWindow(a.label, a.url, a.title)}
-      className="text-left rounded-2xl bg-gradient-to-b from-white/[0.05] to-white/[0.015] border border-white/10 ring-1 ring-inset ring-white/[0.04] p-4 hover:border-cyan-400/30 transition-colors">
-      <div className="flex items-center gap-2.5">
-        <span className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/80">{a.glyph}</span>
-        <div className="flex-1 min-w-0"><div className="text-sm text-white/90">{name}</div><div className="text-[10px] text-white/40 truncate">{desc}</div></div>
-        <span className="text-[11px] text-cyan-200/60 border border-cyan-300/20 rounded-lg px-2 py-1">open ↗</span>
+    <ScreenShell title="Work" subtitle="Your coding & productivity world — commits, tickets, docs, terminal, all in one place.">
+      <div className="grid grid-cols-12 gap-4">
+        <div className="col-span-12 lg:col-span-6"><CodingWidget /></div>
+        <Card title="Terminal" className="col-span-12 lg:col-span-6">
+          <Hint>Embedded terminal with a one-click git-identity switch — <span className="text-white/65">jaskiring ⇄ work-user</span> changes who your commits are authored as. Coming next.</Hint>
+        </Card>
+        <Card title="Jira" className="col-span-12 md:col-span-4"><Hint>Tickets, threaded to your work email & the commits that close them. Coming.</Hint></Card>
+        <Card title="Confluence" className="col-span-12 md:col-span-4"><Hint>Docs & specs. Coming.</Hint></Card>
+        <Card title="Notion" className="col-span-12 md:col-span-4"><Hint>Notes & brainstorming. Coming.</Hint></Card>
       </div>
-    </button>
+      <BuildStatus items={[
+        { label: 'GitHub commits (live, both accounts)', state: 'built' },
+        { label: 'Embedded terminal + git-identity switch', state: 'planned' },
+        { label: 'Jira / Confluence / Notion connectors', state: 'planned' },
+        { label: 'Email → ticket → commit thread', state: 'planned' },
+      ]} />
+    </ScreenShell>
   )
 }
 
@@ -345,30 +369,89 @@ export function FilesScreen() {
 
 /* ───────────────────────── Calendar ───────────────────────── */
 export function CalendarScreen() {
-  const days = ['Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun']
-  const events: Record<number, { t: string; tone: string }[]> = {
-    1: [{ t: 'Shipped 2.5-A', tone: 'bg-cyan-500/20 text-cyan-100' }],
-    3: [{ t: 'Persistence', tone: 'bg-cyan-500/15 text-cyan-200' }],
-    4: [{ t: 'GDD cleanup', tone: 'bg-white/10 text-white/70' }],
+  const { events, loading } = useUpcomingEvents()
+  const [connecting, setConnecting] = useState(false)
+  const [calAccounts, setCalAccounts] = useState<number>(0)
+
+  useEffect(() => {
+    void (async () => {
+      try { setCalAccounts((await accountService.getByService('calendar')).filter(a => a.enabled && a.token).length) }
+      catch { /* ignore */ }
+    })()
+  }, [])
+
+  const connect = async () => {
+    setConnecting(true)
+    try {
+      const t = await connectGoogle()
+      const acc = await accountService.create('calendar', t.email ?? 'Google Calendar', t.accessToken, { email: t.email })
+      await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
+      setCalAccounts(c => c + 1)
+      void connectorFeed.refresh(true)
+    } catch { /* user cancelled or error — leave as-is */ }
+    finally { setConnecting(false) }
   }
+
+  const byDay = new Map<string, { dateLabel: string; items: CalendarEvent[] }>()
+  for (const e of events?.events ?? []) {
+    const d = new Date(e.start)
+    const key = d.toDateString()
+    const dateLabel = d.toLocaleDateString(undefined, { weekday: 'long', month: 'short', day: 'numeric' })
+    if (!byDay.has(key)) byDay.set(key, { dateLabel, items: [] })
+    byDay.get(key)!.items.push(e)
+  }
+
   return (
-    <ScreenShell title="Calendar" subtitle="A timeline of what happened — observations and milestones by day.">
-      <Card className="col-span-12">
-        <div className="grid grid-cols-7 gap-2">
-          {days.map((d, i) => (
-            <div key={d} className="min-h-28 rounded-xl bg-white/[0.02] border border-white/8 p-2">
-              <div className="text-[10px] text-white/35 mb-2">{d}</div>
-              <div className="flex flex-col gap-1">
-                {(events[i] || []).map(e => <span key={e.t} className={`text-[10px] rounded px-1.5 py-1 ${e.tone}`}>{e.t}</span>)}
+    <ScreenShell title="Calendar" subtitle="Your upcoming Google Calendar events — pulled live from connected accounts.">
+      {calAccounts === 0 ? (
+        <Card className="col-span-12">
+          <div className="py-8 text-center">
+            <div className="text-sm text-white/70 mb-1">No Google Calendar connected</div>
+            <div className="text-[11px] text-white/40 mb-5">Connect to see your schedule here, on Home, and via the agent ("what's on my calendar").</div>
+            <button onClick={connect} disabled={connecting || !googleConfigured()}
+              className="font-hud text-[11px] uppercase tracking-wider text-cyan-100 bg-cyan-500/15 hover:bg-cyan-500/25 disabled:opacity-40 px-5 py-2.5 transition-colors"
+              style={{ clipPath: NOTCH8 }}>
+              {connecting ? 'Connecting…' : googleConfigured() ? '+ Connect Google Calendar' : 'Set VITE_GOOGLE_* in .env.local'}
+            </button>
+          </div>
+        </Card>
+      ) : loading && !events ? (
+        <Card className="col-span-12"><Hint>loading calendar…</Hint></Card>
+      ) : !events || events.events.length === 0 ? (
+        <Card className="col-span-12"><Hint>Nothing on the calendar for the next 14 days.</Hint></Card>
+      ) : (
+        <Card className="col-span-12" title="Upcoming" action={
+          <button onClick={connect} disabled={connecting} className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200 disabled:opacity-40">+ Add account</button>
+        }>
+          <div className="max-h-[560px] overflow-y-auto -mx-1 px-1">
+            {[...byDay.values()].map(group => (
+              <div key={group.dateLabel} className="mb-4 last:mb-0">
+                <div className="font-hud text-[9.5px] uppercase tracking-wider text-cyan-300/50 sticky top-0 bg-[#0a1120]/80 backdrop-blur-sm py-1.5 z-10">{group.dateLabel}</div>
+                {group.items.map(e => {
+                  const when = new Date(e.start).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+                  const end = new Date(e.end).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })
+                  return (
+                    <div key={e.id} className="flex items-start gap-3 py-2 border-b border-white/5 last:border-0">
+                      <div className="font-hud text-[11px] text-cyan-200/70 w-20 shrink-0 pt-0.5 tabular-nums">{when}{end && end !== when ? `–${end}` : ''}</div>
+                      <div className="flex-1 min-w-0">
+                        <div className="text-[13px] text-white/85">{e.title}</div>
+                        {e.location && <div className="text-[11px] text-white/40 truncate">📍 {e.location}</div>}
+                        {e.attendees && e.attendees.length > 0 && <div className="text-[10px] text-white/30 truncate">{e.attendees.slice(0, 4).join(', ')}</div>}
+                        {e.meetLink && <a href={e.meetLink} target="_blank" rel="noreferrer" className="text-[10px] text-cyan-300/60 hover:text-cyan-200">Join meeting ↗</a>}
+                      </div>
+                    </div>
+                  )
+                })}
               </div>
-            </div>
-          ))}
-        </div>
-      </Card>
+            ))}
+          </div>
+        </Card>
+      )}
       <BuildStatus items={[
-        { label: 'Activity log (graphActivityLog)', state: 'built' },
-        { label: 'Calendar observer', state: 'planned' },
-        { label: 'Temporal observation view', state: 'planned' },
+        { label: 'Google Calendar (read-only, OAuth)', state: 'built' },
+        { label: 'Shared connector feed', state: 'built' },
+        { label: 'Agent calendar_check tool', state: 'built' },
+        { label: 'Calendar → World Model graph', state: 'planned' },
       ]} />
     </ScreenShell>
   )
@@ -404,9 +487,10 @@ export function PeopleScreen() {
 }
 
 /* ───────────────────────── Settings ───────────────────────── */
-import { accountService, gitHubConnector, gmailConnector, connectGoogle, googleConfigured } from '../../../services/accounts'
-import type { ServiceAccount, ServiceType, MailSummary } from '../../../services/accounts'
+import { accountService, gitHubConnector, gmailConnector, connectGoogle, googleConfigured, useUpcomingEvents, connectorFeed } from '../../../services/accounts'
+import type { ServiceAccount, ServiceType, MailSummary, CalendarEvent } from '../../../services/accounts'
 import { openWebWindow, WEB_APPS } from '../../../services/webwin'
+import { embedPanel, repositionEmbed, hideAllEmbeds } from '../../../services/embed'
 
 function GmailCard() {
   const [accounts, setAccounts] = useState<ServiceAccount[]>([])
@@ -606,13 +690,15 @@ export function SettingsScreen() {
 
 /* ───────────────────────── Router map ───────────────────────── */
 export const SCREENS: Partial<Record<NavKey, FC>> = {
-  agent:    AgentScreen,
-  models:   ModelsScreen,
-  projects: ProjectsScreen,
-  datasets: DatasetsScreen,
-  apps:     AppsScreen,
-  files:    FilesScreen,
-  calendar: CalendarScreen,
-  people:   PeopleScreen,
-  settings: SettingsScreen,
+  agent:     AgentScreen,
+  models:    ModelsScreen,
+  projects:  ProjectsScreen,
+  datasets:  DatasetsScreen,
+  apps:      CanvasScreen,
+  work:      WorkScreen,
+  files:     FilesScreen,
+  calendar:  CalendarScreen,
+  people:    PeopleScreen,
+  playground: PlaygroundScreen,
+  settings:  SettingsScreen,
 }
