@@ -148,22 +148,20 @@ export function AgentScreen() {
           setFlow({ simple: false, understand: ['Understanding the problem…'], plan: ['Working out the steps…'] })
           void planReasoning(msg).then(f => { if (!f.simple) setFlow(f) }).catch(() => {})
         }
-        if (intent.kind === 'tool') await runTools(AGENT_SYSTEM_PROMPT, false)
+        // think=true → qwen3 puts its reasoning in the separate `thinking` field (→ Thinking panel),
+        // not inline in the answer. (Fixes the chain-of-thought leaking into the chat.)
+        if (intent.kind === 'tool') await runTools(AGENT_SYSTEM_PROMPT, true)
         else                        await runBrain(AGENT_SYSTEM_PROMPT, msg, history)
       } else {
         const asm = await assembleMode(activeMode, { message: msg, linkedProject })
         if (asm.note) setLiveStatus(asm.note)
-        if (asm.showGraph) {
-          const aspects = asm.graph?.nodes.length
-            ? asm.graph.nodes.slice(0, 6).map(n => `${n.type}: ${n.name}`)
-            : ['Framing the question…']
-          setFlow({ simple: false, understand: aspects, plan: ['Ground in context', 'Reason it through', 'Answer'] })
-        }
+        // Always paint the mode's approach flow so the template is visible while Piku works.
+        if (asm.flow) setFlow({ simple: false, understand: asm.flow.understand, plan: asm.flow.plan })
         if (asm.handoff) {
           await handoffToExternal(asm.handoff, msg)
           agentHub.addTurn({ role: 'piku', text: `Opened ${asm.handoff.name} and copied your prompt to the clipboard — paste it there to continue the brainstorm.` })
         } else if (asm.useTools) {
-          await runTools(AGENT_SYSTEM_PROMPT + '\n\n' + asm.systemAddon, false)
+          await runTools(AGENT_SYSTEM_PROMPT + '\n\n' + asm.systemAddon, true)
         } else {
           await runBrain(AGENT_SYSTEM_PROMPT + '\n\n' + asm.systemAddon, msg, history)
         }
@@ -435,7 +433,7 @@ export function AgentScreen() {
               !flow ? <Hint>Piku's reasoning and the actions it takes appear here, live, as it works.</Hint> : null
             ) : (
               <div className="flex flex-col gap-3">
-                {trace.map((s, i) => <TraceLine key={i} step={s} />)}
+                {trace.filter(s => s.kind !== 'answer').map((s, i) => <TraceLine key={i} step={s} />)}
                 <div ref={traceEnd} />
               </div>
             )}

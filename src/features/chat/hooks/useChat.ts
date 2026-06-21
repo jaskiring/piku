@@ -152,7 +152,7 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
       if (mode === 'auto') {
         // Auto: tool chores → ToolRouter; conversation/reasoning → opencode brain.
         const intent = classifyIntent(msg)
-        if (intent.kind === 'tool') response = await toolPath(systemContent + '\n\n' + TOOLS_AWARE_SUFFIX, false)
+        if (intent.kind === 'tool') response = await toolPath(systemContent + '\n\n' + TOOLS_AWARE_SUFFIX, true)
         else                        response = await brainPath(systemContent)
       } else {
         const projectId = agentHub.active()?.projectId
@@ -163,7 +163,7 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
           response = `Opened ${asm.handoff.name} and copied your prompt to the clipboard — paste it there to continue.`
           updateLastPikuMessage(response)
         } else if (asm.useTools) {
-          response = await toolPath(systemContent + '\n\n' + TOOLS_AWARE_SUFFIX + '\n\n' + asm.systemAddon, false)
+          response = await toolPath(systemContent + '\n\n' + TOOLS_AWARE_SUFFIX + '\n\n' + asm.systemAddon, true)
         } else {
           response = await brainPath(systemContent + '\n\n' + asm.systemAddon)
         }

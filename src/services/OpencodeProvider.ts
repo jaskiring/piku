@@ -77,9 +77,13 @@ class OpencodeProvider {
     const data = await mRes.json() as MessageResp
     const parts = data.parts ?? []
 
-    const reasoning = parts.filter(p => p.type === 'reasoning').map(p => p.text ?? '').join('')
-    if (reasoning && onThinking) onThinking(reasoning)
-    const answer = parts.filter(p => p.type === 'text').map(p => p.text ?? '').join('').trim()
+    let reasoning = parts.filter(p => p.type === 'reasoning').map(p => p.text ?? '').join('')
+    let answer    = parts.filter(p => p.type === 'text').map(p => p.text ?? '').join('')
+    // Some models embed reasoning as <think>…</think> inside the text part — pull it out so it goes
+    // to the thinking panel, never into the chat answer.
+    answer = answer.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, r) => { reasoning += r; return '' })
+                   .replace(/<\/?think>/gi, '').trim()
+    if (reasoning && onThinking) onThinking(reasoning.trim())
     return answer
   }
 }

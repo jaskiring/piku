@@ -61,7 +61,7 @@ export function detectExternal(message: string): { app: string; web: string; nam
 export interface AssembledContext {
   systemAddon: string        // mode framing + assembled context — appended to the caller's base system
   useTools:    boolean       // true → ToolRouter (Ollama, Piku's Mac tools); false → reasoning brain (opencode)
-  showGraph:   boolean       // render the approach / project graph in the UI
+  flow?:       { understand: string[]; plan: string[] }    // the template's approach, shown as the flow graph
   graph?:      { nodes: GraphNode[]; edges: GraphEdge[] }   // project subgraph for the UI
   handoff?:    { app: string; web: string; name: string }  // brainstorm → open an external assistant
   note?:       string        // short status (e.g. "No project linked")
@@ -105,32 +105,43 @@ export async function assembleMode(
 ): Promise<AssembledContext> {
   switch (mode) {
     case 'execute':
-      return { systemAddon: EXECUTE_FRAMING, useTools: true, showGraph: false }
+      return {
+        systemAddon: EXECUTE_FRAMING, useTools: true,
+        flow: { understand: ['Read the request', 'Choose the right tool'], plan: ['Fire the tool', 'Report the real result'] },
+      }
 
     case 'project': {
       const p = args.linkedProject
       if (!p) {
         return {
           systemAddon: PROJECT_FRAMING + '\n\n(No project is linked to this session — link one with "+ Link project" so I can ground the reasoning. Answering from general knowledge for now.)',
-          useTools: false, showGraph: false, note: 'No project linked',
+          useTools: false, note: 'No project linked',
+          flow: { understand: ['Link a project to ground this'], plan: ['Reason from general knowledge', 'Answer'] },
         }
       }
       const sub = await graphService.getProjectSubgraph(p.id).catch(() => null)
       const ctx = formatProject(p) + (sub && sub.nodes.length ? `\n\n${formatSubgraph(sub)}` : '')
+      const understand = sub && sub.nodes.length
+        ? sub.nodes.slice(0, 6).map(n => `${n.type}: ${n.name}`)
+        : [`Project: ${p.name}`, `State: ${p.currentState}`]
       return {
         systemAddon: `${PROJECT_FRAMING}\n\nPROJECT — "${p.name}":\n${ctx}`,
-        useTools: false, showGraph: !!(sub && sub.nodes.length), graph: sub ?? undefined,
+        useTools: false, graph: sub ?? undefined,
+        flow: { understand, plan: ['Ground in decisions & graph', 'Reason it through', 'Answer'] },
       }
     }
 
     case 'brainstorm': {
       const ext = detectExternal(args.message)
-      if (ext) return { systemAddon: BRAINSTORM_FRAMING, useTools: false, showGraph: false, handoff: ext }
-      return { systemAddon: BRAINSTORM_FRAMING, useTools: false, showGraph: true }
+      if (ext) return { systemAddon: BRAINSTORM_FRAMING, useTools: false, handoff: ext }
+      return {
+        systemAddon: BRAINSTORM_FRAMING, useTools: false,
+        flow: { understand: ['Frame the question'], plan: ['Explore distinct angles', 'Research with web if useful', 'Recommend one'] },
+      }
     }
 
     default: // auto — caller keeps its classifyIntent behavior
-      return { systemAddon: '', useTools: false, showGraph: false }
+      return { systemAddon: '', useTools: false }
   }
 }
 
