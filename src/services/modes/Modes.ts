@@ -67,11 +67,11 @@ export interface AssembledContext {
   note?:       string        // short status (e.g. "No project linked")
 }
 
-const EXECUTE_FRAMING = `[EXECUTE MODE] Act, don't deliberate. You have real tools — pick the one that does what they asked and fire it immediately, then report the REAL result. Don't narrate intentions or ask permission for safe actions. If nothing actionable was asked, say so briefly.`
+const EXECUTE_FRAMING = `[EXECUTE MODE] Bias to action. If a tool does what they asked, fire it and give them the real result — no asking permission for safe actions. If nothing's actionable, just say so.`
 
-const PROJECT_FRAMING = `[PROJECT MODE] Reason strictly within THIS project's world. Ground every claim in the project's state, decisions, and knowledge graph below — cite the specific decision/node when relevant. If the graph doesn't cover something, say what's missing rather than inventing it. Then give a concrete, grounded answer.`
+const PROJECT_FRAMING = `[PROJECT MODE] Think within THIS project's world — lean on its state, decisions, and knowledge graph below, and flag when something isn't covered rather than inventing it. Grounded, but not rigid: answer however actually fits.`
 
-const BRAINSTORM_FRAMING = `[BRAINSTORM MODE] Think wide and exploratory. Surface several distinct angles/options with quick trade-offs, not one safe answer. Use web_search to ground ideas in current facts when useful. End with the option you'd pursue and why.`
+const BRAINSTORM_FRAMING = `[BRAINSTORM MODE] Think WITH them, not at them. Riff, explore, follow tangents, float half-formed ideas and build on theirs. Bring different angles when it helps; use web_search when a real fact would sharpen things. You do NOT have to converge on one answer or hand them a recommendation — leaving threads open and just thinking together is the point.`
 
 function trim(s: string, n: number): string { return s.length > n ? s.slice(0, n).trimEnd() + '…' : s }
 
@@ -136,7 +136,7 @@ export async function assembleMode(
       if (ext) return { systemAddon: BRAINSTORM_FRAMING, useTools: false, handoff: ext }
       return {
         systemAddon: BRAINSTORM_FRAMING, useTools: false,
-        flow: { understand: ['Frame the question'], plan: ['Explore distinct angles', 'Research with web if useful', 'Recommend one'] },
+        flow: { understand: ['Frame the question'], plan: ['Explore angles', 'Riff & build together', 'Leave threads open'] },
       }
     }
 
