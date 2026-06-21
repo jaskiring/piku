@@ -8,9 +8,17 @@ import { graphService }                  from '../../graph'
 import { ollamaService }                 from '../../../services/OllamaService'
 import { toolRouter }                    from '../../../services/ToolRouter'
 import { classifyIntent }                from '../../../services/ReasoningPlanner'
+import { opencodeProvider }              from '../../../services/OpencodeProvider'
 import { agentHub }                      from '../../os/screens/agentSession'
 import { logger }                        from '../../../lib/logger'
 import { PIKU_PERSONA }                  from '../../../lib/persona'
+
+// opencode is Piku's deep-thinking brain (free, capable models). On by default; conversation +
+// reasoning route to it, falling back to local Ollama if the server can't be reached. Toggle-able
+// for a fully-local/private session later (the owner will swap in a self-hosted model).
+let opencodeBrain = true
+export const setOpencodeBrain = (on: boolean) => { opencodeBrain = on }
+export const isOpencodeBrain  = () => opencodeBrain
 
 // Module-level singletons — one instance per app lifetime
 const memoryService     = new MemoryService()
@@ -97,13 +105,16 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
       // Deterministic intent (zero LLM cost): chores fire a tool immediately, complex asks reason
       // (think=true), simple chat just replies. Same routing as the Agent screen — one behavior.
       const intent = classifyIntent(trimmed)
-      const needsTools = intent.kind === 'tool' || intent.kind === 'complex'
+      // tool chores → local ToolRouter (fast, Piku's own tools). Conversation + reasoning (simple
+      // or complex) → the opencode brain (falls back to local Ollama). think only matters for the
+      // local tool path now.
+      const needsTools = intent.kind === 'tool'
       const think      = intent.kind === 'complex'
 
       addMessage('piku', '')  // streaming placeholder — empty, not persisted
       streamingPlaceholderAdded = true
 
-      let response: string
+      let response = ''
       if (needsTools) {
         // ── Tool path: route through ToolRouter ─────────────────────────────
         // chatToolRoundStream emits DELTAS → accumulate locally (updateLast* replace in place).
@@ -120,30 +131,55 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
         response = reply || '(done)'
         logger.chat('tool response', { chars: response.length, kind: intent.kind })
       } else {
-        // ── Plain chat path: fast, no tool overhead ────────────────────────
-        let streamAccumulated   = ''
-        let thinkingAccumulated = ''
-        const priorMsgs = sessionHistory.slice(-10).map(t => ({
-          role: (t.role === 'you' ? 'user' : 'assistant') as 'user' | 'assistant',
-          content: t.text,
-        }))
-        const result = await ollamaService.chatStream(
-          [
-            { role: 'system', content: systemContent },
-            ...priorMsgs,
-            { role: 'user',   content: trimmed        },
-          ],
-          (chunk) => {
-            streamAccumulated += chunk
-            updateLastPikuMessage(streamAccumulated)
-          },
-          (thinkChunk) => {
-            thinkingAccumulated += thinkChunk
-            updateLastPikuThinking(thinkChunk)
-          },
-        )
-        response = result.response
-        logger.chat('response', { chars: response.length, latencyMs: result.latencyMs })
+        // ── Brain path: opencode (free, capable) first; local Ollama as fallback ───────────
+        let done = false
+        if (opencodeBrain) {
+          try {
+            if (await opencodeProvider.ensureServer()) {
+              setPresenceState('thinking')
+              const reply = await opencodeProvider.chat(
+                systemContent, trimmed, sessionHistory,
+                (thinkText) => updateLastPikuThinking(thinkText),
+              )
+              if (reply) {
+                updateLastPikuMessage(reply)
+                response = reply
+                done = true
+                logger.chat('opencode reply', { chars: reply.length, model: 'opencode' })
+              }
+            } else {
+              logger.warn('opencode unreachable — using local Ollama')
+            }
+          } catch (e) {
+            logger.error('opencode brain failed — falling back to Ollama', { error: String(e) })
+          }
+        }
+        if (!done) {
+          // ── Local fallback: Ollama streaming ──
+          let streamAccumulated   = ''
+          let thinkingAccumulated = ''
+          const priorMsgs = sessionHistory.slice(-10).map(t => ({
+            role: (t.role === 'you' ? 'user' : 'assistant') as 'user' | 'assistant',
+            content: t.text,
+          }))
+          const result = await ollamaService.chatStream(
+            [
+              { role: 'system', content: systemContent },
+              ...priorMsgs,
+              { role: 'user',   content: trimmed        },
+            ],
+            (chunk) => {
+              streamAccumulated += chunk
+              updateLastPikuMessage(streamAccumulated)
+            },
+            (thinkChunk) => {
+              thinkingAccumulated += thinkChunk
+              updateLastPikuThinking(thinkChunk)
+            },
+          )
+          response = result.response
+          logger.chat('response', { chars: result.response.length, latencyMs: result.latencyMs })
+        }
       }
       updateLastPikuMessage(response)  // final clean version
       logger.chat('response', { chars: response.length })

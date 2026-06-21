@@ -5,6 +5,7 @@ import { useChat }                            from '../chat'
 import { PIKU_SYSTEM_PROMPT }                 from '../chat/hooks/useChat'
 import { agentHub }                           from './screens/agentSession'
 import { ollamaService }                      from '../../services/OllamaService'
+import { opencodeProvider }                   from '../../services/OpencodeProvider'
 import { voiceService }                       from '../../services/VoiceService'
 import { usePresenceCycle }                   from '../orb'
 import { Sidebar, type NavKey }               from './Sidebar'
@@ -73,6 +74,7 @@ export function Shell() {
         void ollamaService.warmupEmbed()
       }
     })()
+    void opencodeProvider.ensureServer()   // warm Piku's deep-thinking brain (opencode serve) at launch
     void seedAccounts()
     connectorFeed.startAutoRefresh()   // shared connector cache refreshes every 5 min
   }, [])

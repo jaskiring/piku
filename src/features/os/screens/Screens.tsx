@@ -6,6 +6,7 @@ import type { NavKey } from '../Sidebar'
 import { ScreenShell, BuildStatus, Hint } from './ScreenShell'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
+import { opencodeProvider, OPENCODE_MODEL } from '../../../services/OpencodeProvider'
 import { AgentScreen } from './AgentScreen'
 import { CanvasScreen } from './Canvas'
 import { PlaygroundScreen } from './Playground'
@@ -68,8 +69,10 @@ const Glyph = ({ children, accent = 'cyan' }: { children: ReactNode; accent?: 'c
 
 export function ModelsScreen() {
   const [localModels, setLocalModels] = useState<string[]>(Object.keys(KNOWN_MODELS))
+  const [ocOnline, setOcOnline] = useState<boolean | null>(null)
   useEffect(() => {
     void ollamaService.listModels().then(names => { if (names.length) setLocalModels(names) }).catch(() => {})
+    void opencodeProvider.isReachable().then(setOcOnline).catch(() => setOcOnline(false))
   }, [])
   const defaultModel = ACTIVE_BRAIN.model
 
@@ -100,17 +103,17 @@ export function ModelsScreen() {
 
         {/* ── opencode brain (free, capable) ── */}
         <HudPanel className="col-span-12 lg:col-span-5" label="opencode" code="02" accent="violet"
-          action={<HudChip accent="violet" dim>wiring</HudChip>}>
+          action={<HudChip accent="violet" dim={ocOnline !== true}>{ocOnline === null ? 'checking' : ocOnline ? 'online' : 'offline'}</HudChip>}>
           <div className="flex items-start gap-3">
             <Glyph accent="violet">⌘</Glyph>
             <p className="text-[12.5px] leading-relaxed text-white/65">
-              Piku's <span className="text-fuchsia-200/90">deep-thinking brain</span>: free, capable models (Grok Code Fast 1 &amp; co.) driven through opencode — for the hard asks the local 4B can't handle. Runs headless in a Piku workspace that carries your context.
+              Piku's <span className="text-fuchsia-200/90">deep-thinking brain</span> — now wired: conversation &amp; reasoning run on a free, capable model (<span className="text-fuchsia-200/90">{OPENCODE_MODEL.modelID}</span>) through a headless opencode server, so the hard asks aren't limited by the local 4B. Piku keeps building your context locally and hands it over each turn.
             </p>
           </div>
           <button onClick={() => void launchAssistant(OPENCODE)}
             className="mt-3 w-full font-hud text-[10px] uppercase tracking-[0.18em] text-fuchsia-100 bg-fuchsia-500/12 hover:bg-fuchsia-500/20 py-2.5 transition-colors"
             style={{ ...chamfer(8), boxShadow: 'inset 0 0 0 1px rgba(217,70,239,0.3)' }}>
-            Open opencode →
+            Open opencode app →
           </button>
         </HudPanel>
 
@@ -137,12 +140,12 @@ export function ModelsScreen() {
         <HudPanel className="col-span-12" label="Routing" code="04">
           <div className="flex flex-col sm:flex-row gap-3">
             <div className="flex-1 p-3" style={{ ...chamfer(8), background: 'rgba(34,211,238,0.05)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.15)' }}>
-              <div className="font-hud text-[10px] uppercase tracking-[0.18em] text-cyan-300/80 mb-1.5">Now — local + manual handoff</div>
-              <Hint>Local Ollama answers everything through <span className="text-white/70">OllamaService</span> — no network, no key. Open an assistant for the heavy stuff; nothing leaves the machine unless you do.</Hint>
+              <div className="font-hud text-[10px] uppercase tracking-[0.18em] text-cyan-300/80 mb-1.5">Now — local tools + opencode brain</div>
+              <Hint>Tools (open apps, mail, calendar) &amp; embeddings stay on local Ollama — private, instant. Conversation &amp; reasoning route to <span className="text-white/70">opencode</span> (free, capable), with Ollama as automatic fallback if it's offline.</Hint>
             </div>
             <div className="flex-1 p-3" style={{ ...chamfer(8), background: 'rgba(217,70,239,0.05)', boxShadow: 'inset 0 0 0 1px rgba(217,70,239,0.18)' }}>
-              <div className="font-hud text-[10px] uppercase tracking-[0.18em] text-fuchsia-200/80 mb-1.5">Next — capability routing</div>
-              <Hint>Piku routes by need: local for ambient + quick turns, <span className="text-white/70">opencode</span> (free, capable) for hard thinking. Routed by capability, never by model name (P1).</Hint>
+              <div className="font-hud text-[10px] uppercase tracking-[0.18em] text-fuchsia-200/80 mb-1.5">Next — your own model</div>
+              <Hint>Swap opencode for a self-hosted private model later — capability routing is unchanged and a model name never leaks past the provider (P1).</Hint>
             </div>
           </div>
         </HudPanel>
@@ -151,8 +154,9 @@ export function ModelsScreen() {
         { label: 'OllamaService — local, streaming', state: 'built' },
         { label: 'Embeddings → IndexedDB', state: 'built' },
         { label: 'Open assistants — ChatGPT / Claude / Gemini', state: 'built' },
-        { label: 'opencode provider — free capable reasoning', state: 'active' },
-        { label: 'Capability routing (local ↔ opencode)', state: 'planned' },
+        { label: 'opencode brain — free capable reasoning (serve API)', state: 'built' },
+        { label: 'Routing — local tools/embeds ↔ opencode chat', state: 'active' },
+        { label: 'Self-hosted private model swap', state: 'planned' },
       ]} />
     </ScreenShell>
   )

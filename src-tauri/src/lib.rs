@@ -2,6 +2,7 @@ mod hotkey_manager;
 mod ipc;
 mod oauth;
 mod observer;
+mod opencode;
 mod os_tools;
 mod tts;
 mod tray_manager;
@@ -34,6 +35,7 @@ pub fn run() {
             webembed::reposition_embed,
             webembed::hide_embed,
             webembed::hide_all_embeds,
+            opencode::start_opencode_server,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;
