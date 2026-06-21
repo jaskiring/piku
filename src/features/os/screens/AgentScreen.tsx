@@ -94,9 +94,12 @@ export function AgentScreen() {
       if (await opencodeProvider.ensureServer()) {
         setPhase('thinking')
         let captured = ''
-        const reply = await opencodeProvider.chat(system, msg, history, t => { captured += t; setLiveThinking(p => p + t) })
+        const reply = await opencodeProvider.chatStream(
+          system, msg, history,
+          t => { captured += t; setLiveThinking(p => p + t) },                 // reasoning streams live → panel
+          c => { setPhase('listening'); setLiveAnswer(p => p + c) },           // answer streams live → chat
+        )
         if (reply) {
-          setLiveAnswer(reply)
           // Persist the reasoning so it stays visible in the ACT panel after the turn finishes.
           agentHub.setTrace(captured.trim() ? [{ kind: 'thinking', text: captured.trim() }] : [])
           agentHub.addTurn({ role: 'piku', text: reply })

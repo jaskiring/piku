@@ -131,7 +131,12 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
           try {
             if (await opencodeProvider.ensureServer()) {
               setPresenceState('thinking')
-              const reply = await opencodeProvider.chat(system, msg, sessionHistory, (t) => updateLastPikuThinking(t))
+              let acc = '', thinkAcc = ''
+              const reply = await opencodeProvider.chatStream(
+                system, msg, sessionHistory,
+                (t) => { thinkAcc += t; updateLastPikuThinking(thinkAcc) },
+                (c) => { acc += c; updateLastPikuMessage(acc) },
+              )
               if (reply) { updateLastPikuMessage(reply); logger.chat('opencode reply', { chars: reply.length }); return reply }
             } else logger.warn('opencode unreachable — using local Ollama')
           } catch (e) { logger.error('opencode brain failed — falling back to Ollama', { error: String(e) }) }
