@@ -343,21 +343,112 @@ export function AppsScreen() {
   )
 }
 
+/* ───────────────────────── Git Identity switcher ───────────────────────── */
+
+const PERSONAL_EMAIL_KEY = 'personal@example.com'
+const WORK_EMAIL_KEY     = 'work@example.com'
+
+function GitIdentityCard() {
+  const [name, setName]   = useState<string>('')
+  const [email, setEmail] = useState<string>('')
+  const [busy, setBusy]   = useState(false)
+  const [err, setErr]     = useState('')
+
+  const refresh = async () => {
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const [n, e] = await invoke<[string, string]>('git_identity_get')
+      setName(n); setEmail(e)
+    } catch { /* not in Tauri */ }
+  }
+
+  useEffect(() => { void refresh() }, [])
+
+  const switchTo = async (which: 'personal' | 'work') => {
+    setBusy(true); setErr('')
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const [n, e] = await invoke<[string, string]>('git_identity_set', { which })
+      setName(n); setEmail(e)
+    } catch (ex) { setErr(String(ex instanceof Error ? ex.message : ex)) }
+    finally { setBusy(false) }
+  }
+
+  const isPersonal = email === PERSONAL_EMAIL_KEY
+  const isWork     = email === WORK_EMAIL_KEY
+  const tone       = isPersonal ? 'cyan' : isWork ? 'violet' : undefined
+
+  return (
+    <HudPanel label="Git identity" code="GIT" accent={tone === 'violet' ? 'violet' : undefined}
+      action={<HudChip accent={tone === 'violet' ? 'violet' : undefined} dim={!isPersonal && !isWork}>
+        {isPersonal ? 'personal' : isWork ? 'work' : name ? 'custom' : 'unset'}
+      </HudChip>}>
+      {/* Current identity display */}
+      <div className="flex items-center gap-3 mb-3">
+        <Glyph accent={tone === 'violet' ? 'violet' : 'cyan'}>⎇</Glyph>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13.5px] text-white/90 truncate">{name || <span className="text-white/35">—</span>}</div>
+          <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5 truncate">{email || 'not set'}</div>
+        </div>
+      </div>
+
+      {/* Toggle buttons */}
+      <div className="flex gap-2">
+        <button
+          disabled={busy}
+          onClick={() => void switchTo('personal')}
+          className="flex-1 font-hud text-[10px] uppercase tracking-[0.18em] py-2 transition-colors disabled:opacity-40"
+          style={{
+            ...chamfer(7),
+            background: isPersonal ? 'rgba(34,211,238,0.15)' : 'rgba(34,211,238,0.06)',
+            boxShadow: `inset 0 0 0 1px ${isPersonal ? 'rgba(34,211,238,0.45)' : 'rgba(34,211,238,0.2)'}`,
+            color: isPersonal ? '#a5f3fc' : 'rgba(165,243,252,0.5)',
+          }}>
+          Personal<br />
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">jaskiring</span>
+        </button>
+        <button
+          disabled={busy}
+          onClick={() => void switchTo('work')}
+          className="flex-1 font-hud text-[10px] uppercase tracking-[0.18em] py-2 transition-colors disabled:opacity-40"
+          style={{
+            ...chamfer(7),
+            background: isWork ? 'rgba(217,70,239,0.15)' : 'rgba(217,70,239,0.06)',
+            boxShadow: `inset 0 0 0 1px ${isWork ? 'rgba(217,70,239,0.45)' : 'rgba(217,70,239,0.2)'}`,
+            color: isWork ? '#f0abfc' : 'rgba(240,171,252,0.5)',
+          }}>
+          Work<br />
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">work-user</span>
+        </button>
+      </div>
+
+      {err && <div className="font-hud text-[9px] text-red-400/70 mt-2 truncate">{err}</div>}
+      {busy && <div className="font-hud text-[9px] text-white/30 mt-2 uppercase tracking-[0.15em]">applying…</div>}
+      <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/25 mt-3">
+        Sets global <span className="text-white/45">user.name</span> &amp; <span className="text-white/45">user.email</span> — affects all repos on this machine
+      </div>
+    </HudPanel>
+  )
+}
+
 export function WorkScreen() {
   return (
     <ScreenShell title="Work" subtitle="Your coding & productivity world — commits, tickets, docs, terminal, all in one place.">
       <div className="grid grid-cols-12 gap-4">
-        <div className="col-span-12 lg:col-span-6"><CodingWidget /></div>
+        {/* Git identity switch — prominent at the top */}
+        <div className="col-span-12 lg:col-span-6"><GitIdentityCard /></div>
         <Card title="Terminal" className="col-span-12 lg:col-span-6">
-          <Hint>Embedded terminal with a one-click git-identity switch — <span className="text-white/65">jaskiring ⇄ work-user</span> changes who your commits are authored as. Coming next.</Hint>
+          <Hint>Embedded terminal coming next — push / pull without leaving Piku.</Hint>
         </Card>
+        <div className="col-span-12"><CodingWidget /></div>
         <Card title="Jira" className="col-span-12 md:col-span-4"><Hint>Tickets, threaded to your work email & the commits that close them. Coming.</Hint></Card>
         <Card title="Confluence" className="col-span-12 md:col-span-4"><Hint>Docs & specs. Coming.</Hint></Card>
         <Card title="Notion" className="col-span-12 md:col-span-4"><Hint>Notes & brainstorming. Coming.</Hint></Card>
       </div>
       <BuildStatus items={[
         { label: 'GitHub commits (live, both accounts)', state: 'built' },
-        { label: 'Embedded terminal + git-identity switch', state: 'planned' },
+        { label: 'Git identity switch (one-click global)', state: 'built' },
+        { label: 'Embedded terminal + git push', state: 'planned' },
         { label: 'Jira / Confluence / Notion connectors', state: 'planned' },
         { label: 'Email → ticket → commit thread', state: 'planned' },
       ]} />

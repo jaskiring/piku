@@ -1,3 +1,4 @@
+mod gitswitch;
 mod hotkey_manager;
 mod ipc;
 mod oauth;
@@ -44,6 +45,9 @@ pub fn run() {
             webembed::hide_embed,
             webembed::hide_all_embeds,
             opencode::start_opencode_server,
+            gitswitch::git_identity_get,
+            gitswitch::git_identity_set,
+            gitswitch::git_push_current,
         ])
         .setup(|app| {
             tray_manager::create(app.handle())?;
