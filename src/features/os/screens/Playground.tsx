@@ -5,6 +5,8 @@ import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import type { Project } from '../../projects/types'
 import { graphService } from '../../graph'
+import { CornerTicks } from '../Hud'
+import type { Accent } from '../Hud'
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Playground — VR-like infinite desktop. Every Piku feature lives as a draggable
@@ -34,6 +36,12 @@ const openInChrome = async (url: string) => {
     const { invoke } = await import('@tauri-apps/api/core');
     await invoke('open_in_piku_chrome', { url });   // Piku's dedicated, logged-in Chrome profile
   } catch {}
+}
+
+function accentName(rgb: string): Accent {
+  if (rgb.startsWith('217,70,239')) return 'violet'
+  if (rgb.startsWith('245,158,11')) return 'amber'
+  return 'cyan'
 }
 
 // ── Tile definitions — one per Piku feature ─────────────────────────────────
@@ -212,39 +220,59 @@ export function PlaygroundScreen() {
             const tileAccent = meta.accent
             return (
               <div key={meta.id}
-                className="absolute flex flex-col bg-[#0a1120]/92 backdrop-blur-xl"
+                className="absolute flex flex-col group"
                 style={{
                   left: g.x, top: g.y, width: g.w,
                   height: g.collapsed ? 38 : g.h,
                   zIndex: g.z,
-                  boxShadow: `inset 0 0 0 1px rgba(${tileAccent},0.22), 0 18px 50px -20px rgba(0,0,0,0.8)`,
-                  clipPath: 'polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))',
                   transition: 'height 0.15s ease',
+                  filter: 'drop-shadow(0 14px 34px rgba(0,0,0,0.6))',
                 }}>
 
-                {/* ── Titlebar (drag handle) ── */}
-                <div onPointerDown={onPointerDown(meta.id, 'drag')}
-                  className="h-[38px] shrink-0 flex items-center justify-between px-3 cursor-move select-none"
-                  style={{ borderBottom: `1px solid rgba(${tileAccent},0.12)` }}>
-                  <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/55 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5" style={{ background: `rgb(${tileAccent})`, boxShadow: `0 0 7px rgba(${tileAccent},0.7)` }} />
-                    {meta.name}
-                  </span>
-                  <div className="flex items-center gap-1.5">
-                    <button onClick={() => setGeom(g => g && ({ ...g, [meta.id]: { ...g[meta.id], collapsed: !g[meta.id].collapsed } }))}
-                      className="text-white/30 hover:text-white/60 text-[10px] w-5 h-5 flex items-center justify-center"
-                      title={g.collapsed ? 'expand' : 'minimize'}>
-                      {g.collapsed ? '▾' : '▴'}
-                    </button>
-                  </div>
-                </div>
+                {/* neon edge layer — chamfered gradient that forms the hairline frame */}
+                <div className="absolute inset-0 pointer-events-none"
+                  style={{
+                    clipPath: 'polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))',
+                    background: `linear-gradient(160deg, rgba(${tileAccent},0.55), rgba(120,160,210,0.12) 45%, rgba(255,255,255,0.04))`,
+                  }} />
+                {/* dark glass face inset 1.1px to reveal the edge as a crisp hairline */}
+                <div className="absolute inset-[1.1px] bg-gradient-to-b from-[#0a1120]/85 to-[#070b14]/80 backdrop-blur-xl pointer-events-none"
+                  style={{
+                    clipPath: 'polygon(0 0,calc(100% - 11px) 0,100% 11px,100% 100%,11px 100%,0 calc(100% - 11px))',
+                  }} />
+                {/* hover bloom — soft neon glow on hover */}
+                <div className="absolute inset-0 opacity-0 group-hover:opacity-100 transition-opacity pointer-events-none"
+                  style={{
+                    clipPath: 'polygon(0 0,calc(100% - 12px) 0,100% 12px,100% 100%,12px 100%,0 calc(100% - 12px))',
+                    boxShadow: `inset 0 0 26px -6px rgba(${tileAccent},0.22)`,
+                  }} />
 
-                {/* ── Tile body ── */}
-                {!g.collapsed && (
-                  <div className="flex-1 min-h-0 relative overflow-hidden">
-                    <TileBody id={meta.id} persona={persona} />
+                {/* ── Content ── */}
+                <div className="relative flex flex-col flex-1">
+                  {/* ── Titlebar (drag handle) ── */}
+                  <div onPointerDown={onPointerDown(meta.id, 'drag')}
+                    className="h-[38px] shrink-0 flex items-center justify-between px-3 cursor-move select-none"
+                    style={{ borderBottom: `1px solid rgba(${tileAccent},0.12)` }}>
+                    <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/55 flex items-center gap-2">
+                      <span className="w-1.5 h-1.5" style={{ background: `rgb(${tileAccent})`, boxShadow: `0 0 7px rgba(${tileAccent},0.7)` }} />
+                      {meta.name}
+                    </span>
+                    <div className="flex items-center gap-1.5">
+                      <button onClick={() => setGeom(g => g && ({ ...g, [meta.id]: { ...g[meta.id], collapsed: !g[meta.id].collapsed } }))}
+                        className="text-white/30 hover:text-white/60 text-[10px] w-5 h-5 flex items-center justify-center"
+                        title={g.collapsed ? 'expand' : 'minimize'}>
+                        {g.collapsed ? '▾' : '▴'}
+                      </button>
+                    </div>
                   </div>
-                )}
+
+                  {/* ── Tile body ── */}
+                  {!g.collapsed && (
+                    <div className="flex-1 min-h-0 relative overflow-hidden">
+                      <TileBody id={meta.id} persona={persona} accent={tileAccent} />
+                    </div>
+                  )}
+                </div>
 
                 {/* ── Resize handle ── */}
                 {!g.collapsed && (
@@ -252,6 +280,8 @@ export function PlaygroundScreen() {
                     className="absolute bottom-0 right-0 w-4 h-4 cursor-nwse-resize"
                     style={{ background: `linear-gradient(135deg, transparent 50%, rgba(${tileAccent},0.5) 50%)` }} />
                 )}
+
+                <CornerTicks accent={accentName(tileAccent)} />
               </div>
             )
           })}
@@ -263,12 +293,13 @@ export function PlaygroundScreen() {
 
 // ── Tile bodies — each feature as a self-contained panel ────────────────────
 
-function LauncherTile({ name, url }: { name: string; url: string }) {
+function LauncherTile({ name, url, accent }: { name: string; url: string; accent: string }) {
   return (
     <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
-      <span className="font-hud text-[13px] uppercase tracking-[0.25em] text-white/50">{name}</span>
+      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.5)` }}>{name}</span>
       <button onClick={() => openInChrome(url)}
-        className="font-hud text-[11px] uppercase tracking-wider px-4 py-2 transition-colors text-white/70 hover:text-white border border-white/20 hover:border-white/50">
+        className="font-hud text-[10px] uppercase tracking-wider px-3 py-1.5 transition-colors text-white/70 hover:text-white"
+        style={{ clipPath: 'polygon(0 0,calc(100% - 6px) 0,100% 6px,100% 100%,6px 100%,0 calc(100% - 6px))', background: 'rgba(255,255,255,0.03)', boxShadow: `inset 0 0 0 1px rgba(${accent},0.28)` }}>
         Open in browser →
       </button>
       <span className="font-hud text-[9px] text-white/20 uppercase tracking-wider">opens your logged-in Chrome</span>
@@ -276,7 +307,7 @@ function LauncherTile({ name, url }: { name: string; url: string }) {
   )
 }
 
-function TileBody({ id, persona }: { id: TileId; persona: Persona }) {
+function TileBody({ id, persona, accent }: { id: TileId; persona: Persona; accent: string }) {
   switch (id) {
     case 'inbox':    return <InboxTile persona={persona} />
     case 'calendar': return <CalendarTile />
@@ -286,8 +317,8 @@ function TileBody({ id, persona }: { id: TileId; persona: Persona }) {
     case 'graph':    return <GraphTile />
     case 'agent':    return <AgentTile />
     case 'models':   return <ModelsTile />
-    case 'whatsapp': return <LauncherTile name="WhatsApp" url="https://web.whatsapp.com" />
-    case 'linkedin': return <LauncherTile name="LinkedIn" url="https://www.linkedin.com/feed/" />
+    case 'whatsapp': return <LauncherTile name="WhatsApp" url="https://web.whatsapp.com" accent={accent} />
+    case 'linkedin': return <LauncherTile name="LinkedIn" url="https://www.linkedin.com/feed/" accent={accent} />
     default:         return <div className="p-3 text-[11px] text-white/30 font-hud">tile</div>
   }
 }
@@ -451,7 +482,7 @@ function SystemTile() {
 function Stat({ label, value, dim }: { label: string; value: string | number; dim?: boolean }) {
   return (
     <div className="flex items-center justify-between gap-2">
-      <span className="text-white/45 uppercase tracking-wider">{label}</span>
+      <span className="font-hud text-white/45 uppercase tracking-wider">{label}</span>
       <span className={`tabular-nums ${dim ? 'text-amber-300/60' : 'text-white/70'}`}>{value}</span>
     </div>
   )
