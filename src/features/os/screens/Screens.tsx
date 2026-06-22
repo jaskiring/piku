@@ -675,6 +675,54 @@ function GitIdentityCard() {
   )
 }
 
+// Default URLs for productivity tools — opens in the logged-in Piku Chrome profile so the user
+// lands already authenticated. Use the Atlassian / Notion root; they redirect to the right workspace.
+const WORK_TOOL_URLS = {
+  jira:       'https://www.atlassian.com/software/jira',
+  confluence: 'https://www.atlassian.com/software/confluence',
+  notion:     'https://www.notion.so',
+} as const
+
+async function openInPikuChrome(url: string): Promise<void> {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core')
+    await invoke('open_in_piku_chrome', { url })
+  } catch { /* not running inside the desktop app */ }
+}
+
+interface WorkToolCardProps {
+  glyph: string
+  name: string
+  kind: string
+  blurb: string
+  url: string
+  className?: string
+}
+
+function WorkToolCard({ glyph, name, kind, blurb, url, className }: WorkToolCardProps) {
+  return (
+    <HudPanel label={name} className={className}>
+      <div className="flex items-start gap-3 mb-3">
+        <Glyph>{glyph}</Glyph>
+        <div className="flex-1 min-w-0">
+          <div className="text-[13.5px] text-white/90">{name}</div>
+          <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{kind}</div>
+        </div>
+      </div>
+      <div className="text-[12px] text-white/55 leading-relaxed mb-3">{blurb}</div>
+      <button
+        onClick={() => void openInPikuChrome(url)}
+        className="w-full font-hud text-[10px] uppercase tracking-[0.18em] text-cyan-100 bg-cyan-500/12 hover:bg-cyan-500/20 py-2.5 transition-colors"
+        style={{ ...chamfer(8), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.3)' }}>
+        Open in Piku ↗
+      </button>
+      <div className="font-hud text-[9px] uppercase tracking-[0.14em] text-white/20 mt-2">
+        Opens in Piku's Chrome profile — you're already signed in
+      </div>
+    </HudPanel>
+  )
+}
+
 export function WorkScreen() {
   return (
     <ScreenShell title="Work" subtitle="Your coding & productivity world — commits, tickets, docs, terminal, all in one place.">
@@ -682,18 +730,44 @@ export function WorkScreen() {
         {/* Git identity switch — prominent at the top */}
         <div className="col-span-12 lg:col-span-6"><GitIdentityCard /></div>
         <Card title="Terminal" className="col-span-12 lg:col-span-6">
-          <Hint>Embedded terminal coming next — push / pull without leaving Piku.</Hint>
+          <Hint>Embedded PTY terminal — push / pull without leaving Piku. Coming next.</Hint>
         </Card>
         <div className="col-span-12"><CodingWidget /></div>
-        <Card title="Jira" className="col-span-12 md:col-span-4"><Hint>Tickets, threaded to your work email & the commits that close them. Coming.</Hint></Card>
-        <Card title="Confluence" className="col-span-12 md:col-span-4"><Hint>Docs & specs. Coming.</Hint></Card>
-        <Card title="Notion" className="col-span-12 md:col-span-4"><Hint>Notes & brainstorming. Coming.</Hint></Card>
+
+        {/* Productivity tools — open real tools in Piku's Chrome profile */}
+        <WorkToolCard
+          className="col-span-12 md:col-span-4"
+          glyph="◧"
+          name="Jira"
+          kind="Atlassian · project tracking"
+          blurb="Tickets, sprints, and backlog — open your logged-in Jira workspace inside the Piku Chrome profile."
+          url={WORK_TOOL_URLS.jira}
+        />
+        <WorkToolCard
+          className="col-span-12 md:col-span-4"
+          glyph="▦"
+          name="Confluence"
+          kind="Atlassian · docs & specs"
+          blurb="Team wiki and project specs — open your logged-in Confluence space inside the Piku Chrome profile."
+          url={WORK_TOOL_URLS.confluence}
+        />
+        <WorkToolCard
+          className="col-span-12 md:col-span-4"
+          glyph="◫"
+          name="Notion"
+          kind="Notion · notes & brainstorm"
+          blurb="Notes, databases, and brainstorming — open your logged-in Notion workspace inside the Piku Chrome profile."
+          url={WORK_TOOL_URLS.notion}
+        />
       </div>
       <BuildStatus items={[
         { label: 'GitHub commits (live, both accounts)', state: 'built' },
         { label: 'Git identity switch (one-click global)', state: 'built' },
-        { label: 'Embedded terminal + git push', state: 'planned' },
-        { label: 'Jira / Confluence / Notion connectors', state: 'planned' },
+        { label: 'Jira — open in Piku Chrome', state: 'built' },
+        { label: 'Confluence — open in Piku Chrome', state: 'built' },
+        { label: 'Notion — open in Piku Chrome', state: 'built' },
+        { label: 'Embedded PTY terminal + git push', state: 'planned' },
+        { label: 'In-frame Jira / Confluence / Notion embed', state: 'planned' },
         { label: 'Email → ticket → commit thread', state: 'planned' },
       ]} />
     </ScreenShell>
