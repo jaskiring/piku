@@ -206,6 +206,38 @@ pub fn open_path(target: String) -> Result<String, String> {
     { Err("open_path is macOS-only for now".into()) }
 }
 
+/// Open a URL in Piku's OWN dedicated Chrome profile (a persistent `--user-data-dir`), so the user
+/// logs into work Gmail / personal Gmail / LinkedIn / WhatsApp / Gemini ONCE and Piku always opens
+/// the right, already-signed-in window. No embedding, no re-login. The account is chosen by the
+/// caller via the URL (e.g. mail.google.com/mail/u/?authuser=<email>).
+#[tauri::command]
+pub fn open_in_piku_chrome(url: String) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("no url given".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let dir = home()?.join(".piku/chrome");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let ok = Command::new("open")
+            .args([
+                "-na", "Google Chrome", "--args",
+                &format!("--user-data-dir={}", dir.display()),
+                &url,
+            ])
+            .status()
+            .map_err(|e| e.to_string())?;
+        if ok.success() {
+            Ok(format!("Opened {url} in Piku's Chrome profile."))
+        } else {
+            Err(format!("Could not open {url} in Chrome."))
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    { let _ = url; Err("open_in_piku_chrome is macOS-only for now".into()) }
+}
+
 /// Copy text to the macOS clipboard (via `pbcopy`). Used by brainstorm-mode handoff so the owner
 /// can paste the prompt into ChatGPT/Claude/Gemini.
 #[tauri::command]

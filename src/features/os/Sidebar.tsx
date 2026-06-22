@@ -12,7 +12,7 @@ const ITEMS: { key: NavKey; label: string; glyph: string }[] = [
   { key: 'knowledge', label: 'Knowledge', glyph: '✦' },
   { key: 'datasets',  label: 'Datasets',  glyph: '≣' },
   { key: 'apps',      label: 'Apps',      glyph: '⊞' },
-  { key: 'work',      label: 'Work',      glyph: '⊞' },
+  { key: 'work',      label: 'Work',      glyph: '⊟' },
   { key: 'files',     label: 'Files',     glyph: '▭' },
   { key: 'calendar',  label: 'Calendar',  glyph: '◷' },
   { key: 'people',    label: 'People',    glyph: '◍' },

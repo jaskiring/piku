@@ -22,6 +22,7 @@ pub fn run() {
             os_tools::open_app,
             os_tools::open_path,
             os_tools::open_in_app,
+            os_tools::open_in_piku_chrome,
             os_tools::copy_to_clipboard,
             os_tools::list_dir,
             os_tools::fetch_url,

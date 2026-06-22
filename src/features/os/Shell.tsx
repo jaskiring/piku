@@ -17,6 +17,7 @@ import { SCREENS }                            from './screens/Screens'
 import { ImmersiveChat }                      from '../chat/components/ImmersiveChat'
 import { seedAccounts }                       from '../../services/accounts/init'
 import { connectorFeed }                      from '../../services/accounts/ConnectorFeed'
+import { hideAllEmbeds }                      from '../../services/embed'
 
 // The Piku OS shell: sidebar + view + dock over a neural field. The "Ask piku" bar opens an
 // immersive full-screen conversation (ImmersiveChat). The graph lives in the Knowledge view.
@@ -59,6 +60,17 @@ export function Shell() {
   const [view, setView] = useState<NavKey>('home')
   const [focusGalaxyId, setFocusGalaxyId] = useState<string | null>(null)
   const [chatOpen, setChatOpen] = useState(false)
+
+  // Embed lifecycle: keep the Tauri child webviews (WhatsApp/LinkedIn) ALIVE across screen
+  // switches. They're hidden when leaving an embed surface and re-shown on re-entry — never
+  // destroyed — so the site's session/login state and scroll position persist. Without this,
+  // every visit to Apps/Playground re-created the panels and WhatsApp/LinkedIn reloaded fully.
+  const EMBED_SURFACES: NavKey[] = ['apps', 'playground']
+  useEffect(() => {
+    if (EMBED_SURFACES.includes(view)) return            // entering an embed surface → screen mounts and shows them
+    void hideAllEmbeds()                                  // leaving  → park them off-screen (state preserved)
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [view])
 
   const navigateToGalaxy = useCallback((projectName: string) => {
     setFocusGalaxyId(projectName.toLowerCase())

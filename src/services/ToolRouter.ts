@@ -349,7 +349,7 @@ const TOOLS: Record<string, ToolDef> = {
       type: 'function',
       function: {
         name: 'calendar_check',
-        description: "Check the user's upcoming Google Calendar events across all connected accounts. Use for 'what's on my calendar', 'do I have meetings today', 'what's next'. Optionally look further ahead with days.",
+        description: "Check the user's upcoming Google Calendar events across all connected accounts. Use for 'what\'s on my calendar', 'do I have meetings today', 'what\'s next'. Optionally look further ahead with days.",
         parameters: {
           type: 'object',
           properties: {
@@ -385,6 +385,59 @@ const TOOLS: Record<string, ToolDef> = {
         } catch (e) { blocks.push(`${who}: couldn't read calendar (${String(e)})`) }
       }
       return `Calendar (next ${days}d):\n\n` + blocks.join('\n\n')
+    },
+  },
+
+  open_email: {
+    needsLlmRound: false,
+    spec: {
+      type: 'function',
+      function: {
+        name: 'open_email',
+        description: "Open the user's Gmail in their logged-in Piku Chrome profile. Use for 'open my work email', 'check personal email'.",
+        parameters: {
+          type: 'object',
+          properties: {
+            account: { type: 'string', enum: ['work', 'personal'], description: 'which mailbox' },
+          },
+          required: ['account'],
+        },
+      },
+    },
+    run: async (args) => {
+      const acc = String(args.account ?? 'work').toLowerCase()
+      const personal = acc.startsWith('person')
+      const email = personal ? 'personal@example.com' : 'work@example.com'
+      try {
+        await invokeTauri('open_in_piku_chrome', { url: 'https://mail.google.com/mail/u/?authuser=' + email })
+        return 'Opened your ' + (personal ? 'personal' : 'work') + ' Gmail.'
+      } catch (e) { return 'Could not open Gmail: ' + String(e) }
+    },
+  },
+
+  open_web: {
+    needsLlmRound: false,
+    spec: {
+      type: 'function',
+      function: {
+        name: 'open_web',
+        description: "Open any website in the user's logged-in Piku Chrome profile (signed in to Google/Gemini/LinkedIn/WhatsApp). Use for 'open gemini', 'open linkedin'.",
+        parameters: {
+          type: 'object',
+          properties: {
+            url: { type: 'string', description: 'full URL e.g. https://gemini.google.com/app' },
+          },
+          required: ['url'],
+        },
+      },
+    },
+    run: async (args) => {
+      const url = String(args.url ?? '').trim()
+      if (!url) return 'No URL given.'
+      try {
+        await invokeTauri('open_in_piku_chrome', { url })
+        return 'Opened ' + url
+      } catch (e) { return 'Could not open: ' + String(e) }
     },
   },
 }

@@ -1,7 +1,6 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { MailSummary } from '../../../services/accounts'
 import { accountService, gmailConnector, gitHubConnector } from '../../../services/accounts'
-import { embedPanel, hideEmbed, hideAllEmbeds } from '../../../services/embed'
 
 // The Apps "chart paper": a freeform canvas of draggable + resizable panels, all INSIDE Piku.
 // Gmail + GitHub are native React panels scoped to the active persona (Office/Personal); WhatsApp +
@@ -16,10 +15,6 @@ interface Geom { x: number; y: number; w: number; h: number; z: number }
 
 const EMAIL: Record<Persona, string> = { office: 'work@example.com', personal: 'personal@example.com' }
 const GH: Record<Persona, string>    = { office: 'work-user', personal: 'jaskiring' }
-const EMBED = {
-  whatsapp: { label: 'wa', url: 'https://web.whatsapp.com' },
-  linkedin: { label: 'li', url: 'https://www.linkedin.com/feed/' },
-}
 const GRID = 24
 const MIN_W = 300
 const MIN_H = 220
@@ -29,15 +24,12 @@ const LS_PERSONA = 'piku.canvas.persona'
 const PANELS: { id: PanelId; name: string; kind: 'dom' | 'embed' }[] = [
   { id: 'gmail',    name: 'Gmail',    kind: 'dom' },
   { id: 'github',   name: 'GitHub',   kind: 'dom' },
-  { id: 'whatsapp', name: 'WhatsApp', kind: 'embed' },
-  { id: 'linkedin', name: 'LinkedIn', kind: 'embed' },
+  { id: 'whatsapp', name: 'WhatsApp', kind: 'dom' },
+  { id: 'linkedin', name: 'LinkedIn', kind: 'dom' },
 ]
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const snap = (v: number) => Math.round(v / GRID) * GRID
-const overlaps = (a: Geom, b: Geom, gut = 12) =>
-  a.x < b.x + b.w + gut && a.x + a.w + gut > b.x && a.y < b.y + b.h + gut && a.y + a.h + gut > b.y
-
 function defaultLayout(cw: number, ch: number): Record<PanelId, Geom> {
   const w = Math.max(MIN_W, Math.floor((cw - 48) / 2))
   const h = Math.max(MIN_H, Math.floor((ch - 48) / 2))
@@ -70,10 +62,6 @@ function loadLayout(cw: number, ch: number): Record<PanelId, Geom> {
 
 export function CanvasScreen() {
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const bodyRefs: Record<'whatsapp' | 'linkedin', React.RefObject<HTMLDivElement>> = {
-    whatsapp: useRef<HTMLDivElement>(null),
-    linkedin: useRef<HTMLDivElement>(null),
-  }
   const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem(LS_PERSONA) as Persona) || 'office')
   const [geom, setGeom] = useState<Record<PanelId, Geom> | null>(null)
   const [expanded, setExpanded] = useState<PanelId | null>(null)
@@ -94,44 +82,6 @@ export function CanvasScreen() {
   useEffect(() => { if (geom) { const id = setTimeout(() => { try { localStorage.setItem(LS_LAYOUT, JSON.stringify(geom)) } catch { /* quota */ } }, 150); return () => clearTimeout(id) } }, [geom])
   useEffect(() => { localStorage.setItem(LS_PERSONA, persona) }, [persona])
 
-  // position the embedded webviews to follow their frames (skip while a gesture is in flight)
-  const placeEmbeds = () => {
-    for (const key of ['whatsapp', 'linkedin'] as const) {
-      const { label, url } = EMBED[key]
-      if (expanded && expanded !== key) { void hideEmbed(label); continue }
-      const el = bodyRefs[key].current
-      if (!el) { void hideEmbed(label); continue }
-      const r = el.getBoundingClientRect()
-      if (r.width < 2 || r.height < 2) { void hideEmbed(label); continue }
-      void embedPanel(label, url, { x: r.x, y: r.y, width: r.width, height: r.height })
-    }
-  }
-  useEffect(() => {
-    if (!geom || interacting.current) return
-    const id = requestAnimationFrame(placeEmbeds)
-    return () => cancelAnimationFrame(id)
-  }, [geom, expanded])  // eslint-disable-line react-hooks/exhaustive-deps
-
-  // hide embeds when leaving the screen; reposition on window resize
-  useEffect(() => {
-    const onResize = () => {
-      const el = surfaceRef.current; if (!el || !geom) return
-      const r = el.getBoundingClientRect()
-      setGeom(g => {
-        if (!g) return g
-        const n = { ...g }
-        for (const id of Object.keys(n) as PanelId[]) {
-          n[id] = { ...n[id], w: clamp(n[id].w, MIN_W, r.width), h: clamp(n[id].h, MIN_H, r.height) }
-          n[id].x = clamp(n[id].x, 0, Math.max(0, r.width - n[id].w))
-          n[id].y = clamp(n[id].y, 0, Math.max(0, r.height - n[id].h))
-        }
-        return n
-      })
-    }
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize); void hideAllEmbeds() }
-  }, [geom])
-
   if (!geom) return <div ref={surfaceRef} className="absolute inset-0" />
 
   const bringToFront = (id: PanelId) => setGeom(g => g && ({ ...g, [id]: { ...g[id], z: ++zTop.current } }))
@@ -142,7 +92,6 @@ export function CanvasScreen() {
     const gx = geom[id]
     gesture.current = { id, mode, px: e.clientX, py: e.clientY, ox: gx.x, oy: gx.y, ow: gx.w, oh: gx.h }
     interacting.current = true
-    void hideAllEmbeds()             // nothing occludes a moving DOM panel
     bringToFront(id)
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -168,34 +117,13 @@ export function CanvasScreen() {
     setGeom(g => {
       if (!g) return g
       const p = { ...g[gst.id], x: snap(g[gst.id].x), y: snap(g[gst.id].y), w: snap(g[gst.id].w), h: snap(g[gst.id].h) }
-      let n = { ...g, [gst.id]: p }
-      n = nudge(n, gst.id, surfaceRef.current!.getBoundingClientRect())
-      return n
+      return { ...g, [gst.id]: p }
     })
     interacting.current = false
-    force()  // ensure the place-embeds effect re-runs after commit
-  }
-
-  // keep embeds from ever sitting under a DOM panel: push the moved panel out of any overlap
-  function nudge(g: Record<PanelId, Geom>, moved: PanelId, cr: DOMRect): Record<PanelId, Geom> {
-    const isEmbed = (id: PanelId) => id === 'whatsapp' || id === 'linkedin'
-    const others = (Object.keys(g) as PanelId[]).filter(id => id !== moved)
-    const p = { ...g[moved] }
-    for (const oid of others) {
-      if (!isEmbed(moved) && !isEmbed(oid)) continue  // dom-vs-dom may overlap freely
-      const o = g[oid]
-      if (overlaps(p, o)) {
-        // push right or down to nearest free edge, clamped to canvas
-        const right = o.x + o.w + 16
-        if (right + p.w <= cr.width) p.x = right
-        else { const below = o.y + o.h + 16; if (below + p.h <= cr.height) p.y = below; else p.x = Math.max(0, o.x - p.w - 16) }
-      }
-    }
-    return { ...g, [moved]: p }
   }
 
   const toggleExpand = (id: PanelId) => {
-    interacting.current = true; void hideAllEmbeds()
+    interacting.current = true
     setExpanded(cur => (cur === id ? null : id))
     requestAnimationFrame(() => { interacting.current = false; force() })
   }
@@ -225,7 +153,6 @@ export function CanvasScreen() {
         {PANELS.map(meta => {
           const g = expanded === meta.id ? fullRect() : geom[meta.id]
           const hidden = expanded != null && expanded !== meta.id
-          const isEmbed = meta.kind === 'embed'
           return (
             <div key={meta.id}
               className="absolute flex flex-col bg-[#0a1120]/90 backdrop-blur-xl transition-[opacity] duration-150"
@@ -235,18 +162,16 @@ export function CanvasScreen() {
                 className="h-[34px] shrink-0 flex items-center justify-between px-3 cursor-move select-none"
                 style={{ borderBottom: `1px solid rgba(${accent},0.15)` }}>
                 <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/55 flex items-center gap-2">
-                  <span className="w-1.5 h-1.5" style={{ background: `rgb(${isEmbed ? '255,255,255' : accent})`, opacity: isEmbed ? 0.4 : 1, boxShadow: isEmbed ? 'none' : `0 0 7px rgba(${accent},0.7)` }} />
+                  <span className="w-1.5 h-1.5" style={{ background: `rgb(${accent})`, boxShadow: `0 0 7px rgba(${accent},0.7)` }} />
                   {meta.name}
                 </span>
                 <button onClick={() => toggleExpand(meta.id)} className="text-white/40 hover:text-cyan-200 text-xs px-1" title={expanded === meta.id ? 'restore' : 'expand'}>{expanded === meta.id ? '▢' : '⤢'}</button>
               </div>
               {/* body */}
               <div className="flex-1 min-h-0 relative">
-                {isEmbed
-                  ? <div ref={bodyRefs[meta.id as 'whatsapp' | 'linkedin']} className="absolute inset-0">
-                      <div className="absolute inset-0 flex items-center justify-center text-white/20 font-hud text-[10px] uppercase tracking-[0.3em] pointer-events-none">{meta.name}</div>
-                    </div>
-                  : meta.id === 'gmail' ? <GmailPanelBody persona={persona} /> : <GitHubPanelBody persona={persona} />}
+                {meta.id === 'gmail' ? <GmailPanelBody persona={persona} />
+                  : meta.id === 'github' ? <GitHubPanelBody persona={persona} />
+                  : <LauncherPanelBody name={meta.name} url={meta.id === 'whatsapp' ? 'https://web.whatsapp.com' : 'https://www.linkedin.com/feed/'} accent={accent} />}
               </div>
               {/* resize handle (bottom-right) */}
               {expanded !== meta.id && (
@@ -258,6 +183,27 @@ export function CanvasScreen() {
           )
         })}
       </div>
+    </div>
+  )
+}
+
+const openInChrome = async (url: string) => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('open_in_piku_chrome', { url });   // Piku's dedicated, logged-in Chrome profile
+  } catch {}
+}
+
+function LauncherPanelBody({ name, url, accent }: { name: string; url: string; accent: string }) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
+      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.5)` }}>{name}</span>
+      <button onClick={() => openInChrome(url)}
+        className="font-hud text-[11px] uppercase tracking-wider px-4 py-2 transition-colors"
+        style={{ color: `rgba(${accent},0.8)`, border: `1px solid rgba(${accent},0.3)` }}>
+        Open in browser →
+      </button>
+      <span className="font-hud text-[9px] text-white/20 uppercase tracking-wider">opens your logged-in Chrome</span>
     </div>
   )
 }
@@ -284,26 +230,36 @@ function GmailPanelBody({ persona }: { persona: Persona }) {
     return () => { c = true }
   }, [persona])
   return (
-    <div className="absolute inset-0 overflow-y-auto px-3 py-2">
-      {missing ? <div className="text-[11px] text-amber-300/60 p-2">No {persona} Gmail connected — add {EMAIL[persona]} in Settings → Gmail.</div>
-        : mail === null ? <div className="text-[11px] text-white/30 p-2 font-hud">loading inbox…</div>
-        : mail.length === 0 ? <div className="text-[11px] text-white/30 p-2">inbox empty (14d)</div>
-        : mail.map(m => {
-          const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
-          return (
-            <div key={m.id} className="flex items-start gap-2.5 py-2 border-b border-white/[0.04]">
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-cyan-500/25 text-cyan-100' : 'bg-white/10 text-white/50'}`}>{(name[0] || '?').toUpperCase()}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
-                  <span className="text-[10px] text-white/30 shrink-0 font-hud">{mailTime(m.date)}</span>
+    <div className="absolute inset-0 flex flex-col">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] shrink-0">
+        <span className="font-hud text-[10px] text-white/30 uppercase tracking-wider">inbox (14d)</span>
+        <button onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}`)}
+          className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200">
+          Open Gmail →
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 py-1">
+        {missing ? <div className="text-[11px] text-amber-300/60 p-2">No {persona} Gmail connected — add {EMAIL[persona]} in Settings → Gmail.</div>
+          : mail === null ? <div className="text-[11px] text-white/30 p-2 font-hud">loading inbox…</div>
+          : mail.length === 0 ? <div className="text-[11px] text-white/30 p-2">inbox empty (14d)</div>
+          : mail.map(m => {
+            const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
+            return (
+              <div key={m.id} onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}#all/${m.id}`)}
+                className="flex items-start gap-2.5 py-2 border-b border-white/[0.04] cursor-pointer hover:bg-white/[0.02]">
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-cyan-500/25 text-cyan-100' : 'bg-white/10 text-white/50'}`}>{(name[0] || '?').toUpperCase()}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
+                    <span className="text-[10px] text-white/30 shrink-0 font-hud">{mailTime(m.date)}</span>
+                  </div>
+                  <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
+                  <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
                 </div>
-                <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
-                <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+      </div>
     </div>
   )
 }

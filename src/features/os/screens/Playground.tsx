@@ -1,7 +1,6 @@
-import { useEffect, useReducer, useRef, useState, useCallback } from 'react'
+import { useEffect, useRef, useState } from 'react'
 import type { MailSummary } from '../../../services/accounts'
 import { accountService, gmailConnector, gitHubConnector, useConnectorFeed, useInbox, useUpcomingEvents } from '../../../services/accounts'
-import { embedPanel, hideEmbed, hideAllEmbeds } from '../../../services/embed'
 import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import type { Project } from '../../projects/types'
@@ -27,12 +26,15 @@ const LS_KEY = 'piku.playground.v1'
 
 const EMAIL: Record<Persona, string> = { office: 'work@example.com', personal: 'personal@example.com' }
 const GH: Record<Persona, string>    = { office: 'work-user', personal: 'jaskiring' }
-const EMBED = {
-  whatsapp: { label: 'wa', url: 'https://web.whatsapp.com' },
-  linkedin: { label: 'li', url: 'https://www.linkedin.com/feed/' },
-}
 
 const snap = (v: number) => Math.round(v / GRID) * GRID
+
+const openInChrome = async (url: string) => {
+  try {
+    const { invoke } = await import('@tauri-apps/api/core');
+    await invoke('open_in_piku_chrome', { url });   // Piku's dedicated, logged-in Chrome profile
+  } catch {}
+}
 
 // ── Tile definitions — one per Piku feature ─────────────────────────────────
 
@@ -46,8 +48,8 @@ const TILES: TileDef[] = [
   { id: 'graph',     name: 'World Model',    kind: 'dom',   accent: '34,211,238' },
   { id: 'agent',     name: 'Agent',          kind: 'dom',   accent: '217,70,239' },
   { id: 'models',    name: 'Models',         kind: 'dom',   accent: '34,211,238' },
-  { id: 'whatsapp',  name: 'WhatsApp',       kind: 'embed', accent: '255,255,255' },
-  { id: 'linkedin',  name: 'LinkedIn',       kind: 'embed', accent: '255,255,255' },
+  { id: 'whatsapp',  name: 'WhatsApp',       kind: 'dom', accent: '255,255,255' },
+  { id: 'linkedin',  name: 'LinkedIn',       kind: 'dom', accent: '255,255,255' },
 ]
 
 function defaultLayout(): Record<TileId, Geom> {
@@ -96,13 +98,8 @@ function loadLayout(): Record<TileId, Geom> {
 
 export function PlaygroundScreen() {
   const surfaceRef = useRef<HTMLDivElement>(null)
-  const bodyRefs: Record<string, React.RefObject<HTMLDivElement>> = {
-    whatsapp: useRef<HTMLDivElement>(null),
-    linkedin: useRef<HTMLDivElement>(null),
-  }
   const [geom, setGeom] = useState<Record<TileId, Geom>>(loadLayout)
   const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem('piku.canvas.persona') as Persona) || 'office')
-  const [, force] = useReducer(n => n + 1, 0)
   const zTop = useRef(10)
   const interacting = useRef(false)
   const gesture = useRef<{ id: TileId; mode: 'drag' | 'resize' | 'pan'; px: number; py: number; ox: number; oy: number; ow: number; oh: number; scrollX0: number; scrollY0: number } | null>(null)
@@ -113,31 +110,6 @@ export function PlaygroundScreen() {
     const id = setTimeout(() => { try { localStorage.setItem(LS_KEY, JSON.stringify(geom)) } catch { /* quota */ } }, 200)
     return () => clearTimeout(id)
   }, [geom])
-
-  // position embed webviews
-  const placeEmbeds = useCallback(() => {
-    for (const key of ['whatsapp', 'linkedin'] as const) {
-      const { label, url } = EMBED[key]
-      if (geom[key]?.collapsed) { void hideEmbed(label); continue }
-      const el = bodyRefs[key].current
-      if (!el) { void hideEmbed(label); continue }
-      const r = el.getBoundingClientRect()
-      if (r.width < 2 || r.height < 2) { void hideEmbed(label); continue }
-      void embedPanel(label, url, { x: r.x, y: r.y, width: r.width, height: r.height })
-    }
-  }, [geom])
-  useEffect(() => {
-    if (interacting.current) return
-    const id = requestAnimationFrame(placeEmbeds)
-    return () => cancelAnimationFrame(id)
-  }, [geom, placeEmbeds])
-
-  // hide embeds on unmount; reposition on resize
-  useEffect(() => {
-    const onResize = () => force()   // just re-render; placeEmbeds runs on geom change
-    window.addEventListener('resize', onResize)
-    return () => { window.removeEventListener('resize', onResize); void hideAllEmbeds() }
-  }, [])
 
   useEffect(() => { localStorage.setItem('piku.canvas.persona', persona) }, [persona])
 
@@ -151,12 +123,10 @@ export function PlaygroundScreen() {
     const gx = geom[id]
     gesture.current = { id, mode, px: e.clientX, py: e.clientY, ox: gx.x, oy: gx.y, ow: gx.w, oh: gx.h, scrollX0: scrollPos.x, scrollY0: scrollPos.y }
     interacting.current = true
-    void hideAllEmbeds()
     bringToFront(id)
   }
 
   const onCanvasPointerDown = (e: React.PointerEvent) => {
-    // Middle-click or right-click on empty canvas → pan
     if (e.button === 1 || (e.button === 0 && e.shiftKey)) {
       e.preventDefault()
       gesture.current = { id: '_pan', mode: 'pan', px: e.clientX, py: e.clientY, ox: 0, oy: 0, ow: 0, oh: 0, scrollX0: scrollPos.x, scrollY0: scrollPos.y }
@@ -194,7 +164,6 @@ export function PlaygroundScreen() {
       return { ...g, [gst.id]: p }
     })
     interacting.current = false
-    force()
   }
 
   // Scroll = pan the canvas (like Figma's scroll-to-pan)
@@ -240,7 +209,6 @@ export function PlaygroundScreen() {
           {TILES.map(meta => {
             const g = geom[meta.id]
             if (!g) return null
-            const isEmbed = meta.kind === 'embed'
             const tileAccent = meta.accent
             return (
               <div key={meta.id}
@@ -259,7 +227,7 @@ export function PlaygroundScreen() {
                   className="h-[38px] shrink-0 flex items-center justify-between px-3 cursor-move select-none"
                   style={{ borderBottom: `1px solid rgba(${tileAccent},0.12)` }}>
                   <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/55 flex items-center gap-2">
-                    <span className="w-1.5 h-1.5" style={{ background: `rgb(${tileAccent})`, opacity: isEmbed ? 0.4 : 1, boxShadow: isEmbed ? 'none' : `0 0 7px rgba(${tileAccent},0.7)` }} />
+                    <span className="w-1.5 h-1.5" style={{ background: `rgb(${tileAccent})`, boxShadow: `0 0 7px rgba(${tileAccent},0.7)` }} />
                     {meta.name}
                   </span>
                   <div className="flex items-center gap-1.5">
@@ -274,11 +242,7 @@ export function PlaygroundScreen() {
                 {/* ── Tile body ── */}
                 {!g.collapsed && (
                   <div className="flex-1 min-h-0 relative overflow-hidden">
-                    {isEmbed
-                      ? <div ref={bodyRefs[meta.id as 'whatsapp' | 'linkedin']} className="absolute inset-0">
-                          <div className="absolute inset-0 flex items-center justify-center text-white/20 font-hud text-[10px] uppercase tracking-[0.3em] pointer-events-none">{meta.name}</div>
-                        </div>
-                      : <TileBody id={meta.id} persona={persona} />}
+                    <TileBody id={meta.id} persona={persona} />
                   </div>
                 )}
 
@@ -299,6 +263,19 @@ export function PlaygroundScreen() {
 
 // ── Tile bodies — each feature as a self-contained panel ────────────────────
 
+function LauncherTile({ name, url }: { name: string; url: string }) {
+  return (
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
+      <span className="font-hud text-[13px] uppercase tracking-[0.25em] text-white/50">{name}</span>
+      <button onClick={() => openInChrome(url)}
+        className="font-hud text-[11px] uppercase tracking-wider px-4 py-2 transition-colors text-white/70 hover:text-white border border-white/20 hover:border-white/50">
+        Open in browser →
+      </button>
+      <span className="font-hud text-[9px] text-white/20 uppercase tracking-wider">opens your logged-in Chrome</span>
+    </div>
+  )
+}
+
 function TileBody({ id, persona }: { id: TileId; persona: Persona }) {
   switch (id) {
     case 'inbox':    return <InboxTile persona={persona} />
@@ -309,6 +286,8 @@ function TileBody({ id, persona }: { id: TileId; persona: Persona }) {
     case 'graph':    return <GraphTile />
     case 'agent':    return <AgentTile />
     case 'models':   return <ModelsTile />
+    case 'whatsapp': return <LauncherTile name="WhatsApp" url="https://web.whatsapp.com" />
+    case 'linkedin': return <LauncherTile name="LinkedIn" url="https://www.linkedin.com/feed/" />
     default:         return <div className="p-3 text-[11px] text-white/30 font-hud">tile</div>
   }
 }
@@ -318,7 +297,6 @@ function TileBody({ id, persona }: { id: TileId; persona: Persona }) {
 function InboxTile({ persona }: { persona: Persona }) {
   const { inbox } = useInbox()
   const [localMail, setLocalMail] = useState<MailSummary[] | null>(null)
-  // If the shared feed has data, use it; otherwise fetch per-persona
   useEffect(() => {
     if (inbox?.messages.length) return
     let c = false
@@ -332,24 +310,34 @@ function InboxTile({ persona }: { persona: Persona }) {
   }, [persona, inbox])
   const mail = inbox?.messages ?? localMail ?? null
   return (
-    <div className="absolute inset-0 overflow-y-auto px-3 py-2">
-      {mail === null ? <div className="text-[11px] text-white/30 p-2 font-hud">loading inbox…</div>
-        : mail.length === 0 ? <div className="text-[11px] text-white/30 p-2">inbox empty (14d)</div>
-        : mail.map(m => {
-          const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
-          return (
-            <div key={m.id} className="flex items-start gap-2.5 py-2 border-b border-white/[0.04]">
-              <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-violet-500/25 text-violet-100' : 'bg-white/10 text-white/50'}`}>{(name[0] || '?').toUpperCase()}</span>
-              <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-between gap-2">
-                  <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
+    <div className="absolute inset-0 flex flex-col">
+      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] shrink-0">
+        <span className="font-hud text-[10px] text-white/30 uppercase tracking-wider">inbox (14d)</span>
+        <button onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}`)}
+          className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200">
+          Open Gmail →
+        </button>
+      </div>
+      <div className="flex-1 overflow-y-auto px-3 py-1">
+        {mail === null ? <div className="text-[11px] text-white/30 p-2 font-hud">loading inbox…</div>
+          : mail.length === 0 ? <div className="text-[11px] text-white/30 p-2">inbox empty (14d)</div>
+          : mail.map(m => {
+            const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
+            return (
+              <div key={m.id} onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}#all/${m.id}`)}
+                className="flex items-start gap-2.5 py-2 border-b border-white/[0.04] cursor-pointer hover:bg-white/[0.02]">
+                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-violet-500/25 text-violet-100' : 'bg-white/10 text-white/50'}`}>{(name[0] || '?').toUpperCase()}</span>
+                <div className="flex-1 min-w-0">
+                  <div className="flex items-center justify-between gap-2">
+                    <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
+                  </div>
+                  <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
+                  <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
                 </div>
-                <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
-                <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
               </div>
-            </div>
-          )
-        })}
+            )
+          })}
+      </div>
     </div>
   )
 }

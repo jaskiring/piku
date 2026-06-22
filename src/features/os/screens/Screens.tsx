@@ -506,9 +506,15 @@ export function CalendarScreen() {
     setConnecting(true)
     try {
       const t = await connectGoogle()
-      const acc = await accountService.create('calendar', t.email ?? 'Google Calendar', t.accessToken, { email: t.email })
-      await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
-      setCalAccounts(c => c + 1)
+      const lbl = t.email ? t.email.split('@')[0] : 'Calendar'
+      // upsert by email so reconnecting the same account updates instead of duplicating
+      const existing = (await accountService.getByService('calendar')).find(a => a.email && t.email && a.email.toLowerCase() === t.email.toLowerCase())
+      if (existing) {
+        await accountService.save({ ...existing, label: lbl, token: t.accessToken, refreshToken: t.refreshToken ?? existing.refreshToken, tokenExpiresAt: t.expiresAt })
+      } else {
+        const acc = await accountService.create('calendar', lbl, t.accessToken, { email: t.email })
+        await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
+      }
       void connectorFeed.refresh(true)
     } catch { /* user cancelled or error — leave as-is */ }
     finally { setConnecting(false) }
