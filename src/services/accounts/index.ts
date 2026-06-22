@@ -5,6 +5,7 @@ export type { MailSummary } from './connectors/GmailConnector'
 export { CalendarConnector, calendarConnector, CalendarApiError } from './connectors/CalendarConnector'
 export type { CalendarEvent } from './connectors/CalendarConnector'
 export { connectGoogle, refreshGoogle, googleConfigured } from './googleOAuth'
+export type { GoogleTokens } from './googleOAuth'
 export { seedAccounts } from './init'
 export {
   connectorFeed,

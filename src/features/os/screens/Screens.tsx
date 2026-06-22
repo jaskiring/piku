@@ -946,7 +946,7 @@ function tagForEmail(email: string | undefined): CalAccountTag {
 
 export function CalendarScreen() {
   const [connecting, setConnecting] = useState(false)
-  const [calAccts, setCalAccts] = useState<import('../../../services/accounts').ServiceAccount[]>([])
+  const [calAccts, setCalAccts] = useState<ServiceAccount[]>([])
   const [taggedEvents, setTaggedEvents] = useState<TaggedCalendarEvent[] | null>(null)
   const [loadingCal, setLoadingCal] = useState(false)
   const [filter, setFilter] = useState<CalFilter>('all')
@@ -1017,21 +1017,68 @@ export function CalendarScreen() {
 
   useEffect(() => { void loadAll() }, [])  // eslint-disable-line react-hooks/exhaustive-deps
 
+  // Persist a fresh Google token back onto a specific account record (by id).
+  // If the account is service='email' it stays service='email'; if service='calendar' it stays that.
+  // Also upserts a matching 'calendar'-service row so CalendarConnector can always find it.
+  const persistGoogleToken = async (t: GoogleTokens) => {
+    const lbl = t.email ? t.email.split('@')[0] : 'Calendar'
+    // Search BOTH 'email' and 'calendar' service rows for a matching email.
+    const [calRows, emailRows] = await Promise.all([
+      accountService.getByService('calendar'),
+      accountService.getByService('email'),
+    ])
+    const emailLower = (t.email ?? '').toLowerCase()
+    const matchingCal   = calRows.find(a => a.email && a.email.toLowerCase() === emailLower)
+    const matchingEmail = emailRows.find(a => a.email && a.email.toLowerCase() === emailLower)
+
+    // Update the existing 'calendar'-service row (or create a new one).
+    if (matchingCal) {
+      await accountService.save({
+        ...matchingCal, label: lbl, token: t.accessToken,
+        refreshToken: t.refreshToken ?? matchingCal.refreshToken,
+        tokenExpiresAt: t.expiresAt,
+      })
+    } else {
+      const acc = await accountService.create('calendar', lbl, t.accessToken, { email: t.email })
+      await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
+    }
+
+    // Also update the 'email'-service row so Gmail keeps working with the new token.
+    if (matchingEmail) {
+      await accountService.save({
+        ...matchingEmail, token: t.accessToken,
+        refreshToken: t.refreshToken ?? matchingEmail.refreshToken,
+        tokenExpiresAt: t.expiresAt,
+      })
+    }
+  }
+
   const connect = async () => {
     setConnecting(true)
     try {
       const t = await connectGoogle()
-      const lbl = t.email ? t.email.split('@')[0] : 'Calendar'
-      const existing = (await accountService.getByService('calendar')).find(a => a.email && t.email && a.email.toLowerCase() === t.email.toLowerCase())
-      if (existing) {
-        await accountService.save({ ...existing, label: lbl, token: t.accessToken, refreshToken: t.refreshToken ?? existing.refreshToken, tokenExpiresAt: t.expiresAt })
-      } else {
-        const acc = await accountService.create('calendar', lbl, t.accessToken, { email: t.email })
-        await accountService.save({ ...acc, refreshToken: t.refreshToken, tokenExpiresAt: t.expiresAt })
-      }
+      await persistGoogleToken(t)
       void connectorFeed.refresh(true)
       await loadAll(true)
     } catch { /* user cancelled or error */ }
+    finally { setConnecting(false) }
+  }
+
+  // Targeted reconnect for a specific account that failed with a 401/403 (missing calendar scope).
+  // Runs the full OAuth consent flow (prompt=consent already set in googleOAuth.ts) so Google
+  // re-shows the consent screen and the resulting token carries the calendar.readonly scope.
+  // After the new token is obtained it is written back onto the EXACT account record that errored
+  // (matched by email across both 'email' and 'calendar' service rows) so the next fetch uses it.
+  const reconnect = async (acct: ServiceAccount) => {
+    setConnecting(true)
+    try {
+      const t = await connectGoogle()
+      await persistGoogleToken(t)
+      // Clear the error for this account immediately so the UI stops showing the warning.
+      setAuthErrors(prev => prev.filter(e => e.acct.id !== acct.id))
+      void connectorFeed.refresh(true)
+      await loadAll(true)
+    } catch { /* user cancelled */ }
     finally { setConnecting(false) }
   }
 
@@ -1126,10 +1173,10 @@ export function CalendarScreen() {
                     : `Calendar fetch failed (${code}) — reconnect to retry`}
                 </div>
               </div>
-              <button onClick={connect} disabled={connecting}
+              <button onClick={() => void reconnect(acct)} disabled={connecting}
                 className="font-hud text-[9.5px] uppercase tracking-[0.15em] text-amber-200 hover:text-amber-100 px-2.5 py-1.5 transition-colors shrink-0 disabled:opacity-40"
                 style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(251,191,36,0.35)' }}>
-                Reconnect
+                {connecting ? 'Connecting…' : 'Reconnect'}
               </button>
             </div>
           ))}
@@ -1263,7 +1310,7 @@ export function PeopleScreen() {
 import { isOpencodeBrain, setOpencodeBrain } from '../../../features/chat/hooks/useChat'
 import { DB_VERSION } from '../../../features/memory/db'
 import { accountService, gitHubConnector, gmailConnector, connectGoogle, googleConfigured, connectorFeed } from '../../../services/accounts'
-import type { ServiceAccount, ServiceType, MailSummary, CalendarEvent } from '../../../services/accounts'
+import type { ServiceAccount, ServiceType, MailSummary, CalendarEvent, GoogleTokens } from '../../../services/accounts'
 import { openWebWindow, WEB_APPS } from '../../../services/webwin'
 import { embedPanel, repositionEmbed, hideAllEmbeds } from '../../../services/embed'
 
