@@ -71,9 +71,11 @@ const Glyph = ({ children, accent = 'cyan' }: { children: ReactNode; accent?: 'c
 export function ModelsScreen() {
   const [localModels, setLocalModels] = useState<string[]>(Object.keys(KNOWN_MODELS))
   const [ocOnline, setOcOnline] = useState<boolean | null>(null)
+  const [ollamaUp, setOllamaUp] = useState<boolean | null>(null)
   useEffect(() => {
     void ollamaService.listModels().then(names => { if (names.length) setLocalModels(names) }).catch(() => {})
     void opencodeProvider.isReachable().then(setOcOnline).catch(() => setOcOnline(false))
+    void ollamaService.isReachable().then(setOllamaUp).catch(() => setOllamaUp(false))
   }, [])
   const defaultModel = ACTIVE_BRAIN.model
 
@@ -86,7 +88,15 @@ export function ModelsScreen() {
           <div className="flex flex-col gap-2">
             {localModels.map(name => {
               const m = modelMeta(name)
-              const running = name === defaultModel
+              const isActive = name === defaultModel
+              const badgeText = ollamaUp === false
+                ? 'offline'
+                : isActive && ollamaUp === true
+                  ? 'running'
+                  : ollamaUp === null
+                    ? 'checking'
+                    : 'idle'
+              const isDim = !(isActive && ollamaUp === true)
               return (
                 <div key={name} className="flex items-center gap-3 px-3 py-2.5" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
                   <Glyph>{m.glyph}</Glyph>
@@ -94,7 +104,7 @@ export function ModelsScreen() {
                     <div className="text-[13.5px] text-white/90 truncate">{name}</div>
                     <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{m.kind}</div>
                   </div>
-                  <HudChip dim={!running}>{running ? 'running' : 'idle'}</HudChip>
+                  <HudChip dim={isDim}>{badgeText}</HudChip>
                 </div>
               )
             })}
@@ -151,14 +161,28 @@ export function ModelsScreen() {
           </div>
         </HudPanel>
       </div>
-      <BuildStatus items={[
-        { label: 'OllamaService — local, streaming', state: 'built' },
-        { label: 'Embeddings → IndexedDB', state: 'built' },
-        { label: 'Open assistants — ChatGPT / Claude / Gemini', state: 'built' },
-        { label: 'opencode brain — free capable reasoning (serve API)', state: 'built' },
-        { label: 'Routing — local tools/embeds ↔ opencode chat', state: 'active' },
-        { label: 'Self-hosted private model swap', state: 'planned' },
-      ]} />
+      <HudPanel label="Build status" code="05" className="mt-6">
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            { label: 'OllamaService — local, streaming', state: 'built' as const },
+            { label: 'Embeddings → IndexedDB', state: 'built' as const },
+            { label: 'Open assistants — ChatGPT / Claude / Gemini', state: 'built' as const },
+            { label: 'opencode brain — free capable reasoning (serve API)', state: 'built' as const },
+            { label: 'Routing — local tools/embeds ↔ opencode chat', state: 'active' as const },
+            { label: 'Self-hosted private model swap', state: 'planned' as const },
+          ] as const).map(it => (
+            <span key={it.label}
+              className={`font-hud text-[9.5px] px-2.5 py-1 tracking-[0.12em] uppercase border ${
+                it.state === 'built' ? 'text-cyan-300/80 bg-cyan-500/10 border-cyan-400/20'
+                : 'text-cyan-200/75 bg-cyan-400/[0.07] border-cyan-300/20'
+              }`}
+              style={{ ...chamfer(6) }}>
+              <span className="mr-1.5 opacity-60 text-[8px]">{it.state === 'built' ? '✓' : '○'}</span>
+              {it.label}
+            </span>
+          ))}
+        </div>
+      </HudPanel>
     </ScreenShell>
   )
 }
@@ -191,26 +215,29 @@ export function ProjectsScreen({ onNavigateToGalaxy, onNavigate }: { onNavigateT
   }
   return (
     <ScreenShell title="Projects" subtitle={live ? 'Live from your local project store.' : 'Sample projects — your real ones load from IndexedDB.'} action={<AddBtn label="+ New project" />}>
-      <div className="grid grid-cols-12 gap-4">
-        {projects.map(p => (
-          <Card key={p.name} className="col-span-12 md:col-span-6 lg:col-span-4">
-            <div className="flex items-center gap-2.5 mb-3">
-              <span className="w-9 h-9 rounded-xl bg-cyan-500/10 border border-cyan-400/15 flex items-center justify-center text-cyan-300/80">▤</span>
-              <div className="flex-1 min-w-0">
-                <div className="text-sm text-white/90 truncate">{p.name}</div>
-                <div className="text-[10px] text-white/40">{p.state}</div>
+      <HudPanel label="Projects" code="01" action={<HudChip dim>{projects.length} tracked</HudChip>}>
+        {live && projects.length === 0 ? (
+          <div className="font-hud text-[11px] uppercase tracking-[0.14em] text-cyan-300/45 py-6 text-center">
+            No projects yet — Piku creates them as it learns about your work.
+          </div>
+        ) : (
+          <div className="flex flex-col gap-2">
+            {projects.map(p => (
+              <div key={p.name} className="flex items-center gap-3 px-3 py-2.5" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
+                <Glyph>▤</Glyph>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13.5px] text-white/90 truncate">{p.name}</div>
+                  <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{p.docs} docs · context tracked</div>
+                </div>
+                <HudChip dim>{p.state}</HudChip>
+                <button onClick={() => openGraph(p.name)}
+                  className="font-hud text-[9.5px] uppercase tracking-[0.15em] text-cyan-200 hover:text-cyan-100 px-2.5 py-1.5 transition-colors"
+                  style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.25)' }}>✦ graph</button>
               </div>
-              <button onClick={() => openGraph(p.name)}
-                className="font-hud text-[9px] uppercase tracking-[0.12em] text-cyan-300/50 hover:text-cyan-200 border border-cyan-400/15 hover:border-cyan-400/30 px-2 py-1 transition-colors">
-                ✦ graph
-              </button>
-            </div>
-            <div className="flex items-center gap-3 text-[11px] text-white/40">
-              <span>{p.docs} docs</span><span>·</span><span>context tracked</span>
-            </div>
-          </Card>
-        ))}
-      </div>
+            ))}
+          </div>
+        )}
+      </HudPanel>
       <BuildStatus items={[
         { label: 'ProjectService / ProjectStore', state: 'built' },
         { label: 'Extraction + retrieval + context versions', state: 'built' },
@@ -231,20 +258,20 @@ export function DatasetsScreen() {
   return (
     <ScreenShell title="Datasets" subtitle="Documents absorbed into Piku's memory and World Model." action={<AddBtn label="+ Add source" />}>
       <div className="grid grid-cols-12 gap-4">
-        <Card className="col-span-12" bodyClass="!p-0">
-          <div className="flex items-center gap-2 px-4 pt-2 pb-1">
-            <span className="font-hud text-[9px] uppercase tracking-[0.2em] text-amber-300/80 bg-amber-400/10 border border-amber-400/25 rounded px-2 py-0.5">SAMPLE — not yet wired</span>
+        <HudPanel className="col-span-12" label="Sources" code="01">
+          <div className="flex items-center gap-2 mb-3">
+            <span className="font-hud text-[9px] uppercase tracking-[0.2em] text-amber-300/80 bg-amber-400/10 border border-amber-400/25 px-2 py-0.5" style={{ ...chamfer(5) }}>SAMPLE — not yet wired</span>
           </div>
-          <div className="divide-y divide-white/5">
+          <div className="flex flex-col gap-2">
             {sets.map(s => (
-              <div key={s.name} className="flex items-center gap-3 px-4 py-3">
-                <span className="w-8 h-8 rounded-lg bg-white/5 flex items-center justify-center text-white/45 text-xs">≣</span>
-                <div className="flex-1 min-w-0"><div className="text-sm text-white/85 truncate">{s.name}</div><div className="text-[10px] text-white/35">{s.kind}</div></div>
-                <Pill tone={s.status === 'Absorbed' ? 'run' : 'idle'}>{s.status}</Pill>
+              <div key={s.name} className="flex items-center gap-3 px-3 py-2.5" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
+                <span className="w-8 h-8 shrink-0 flex items-center justify-center text-[13px] text-white/50" style={{ ...chamfer(6), background: 'rgba(255,255,255,0.04)', boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.08)' }}>≣</span>
+                <div className="flex-1 min-w-0"><div className="text-[13.5px] text-white/90 truncate">{s.name}</div><div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{s.kind}</div></div>
+                <HudChip dim={s.status !== 'Absorbed'}>{s.status}</HudChip>
               </div>
             ))}
           </div>
-        </Card>
+        </HudPanel>
       </div>
       <BuildStatus items={[
         { label: 'DocumentAbsorptionService', state: 'planned' },
@@ -614,11 +641,12 @@ export function PeopleScreen() {
           </div>
         ) : graphAvailable && realPeople.length === 0 ? (
           <div className="col-span-12">
-            <Card>
-              <div className="text-sm text-white/50 text-center py-6">
-                No people yet — Piku adds them as it learns about your world.
+            <HudPanel accent="amber">
+              <div className="text-center py-4">
+                <div className="font-hud text-[10px] uppercase tracking-[0.18em] text-amber-200/60">No people yet</div>
+                <p className="text-[12.5px] text-white/45 mt-1.5">Piku adds them as it learns about your world.</p>
               </div>
-            </Card>
+            </HudPanel>
           </div>
         ) : (
           (graphAvailable ? realPeople : MOCK_PEOPLE.map(m => ({ name: m.n, r: m.r, seen: m.seen }))).map(p => (
@@ -634,12 +662,26 @@ export function PeopleScreen() {
           ))
         )}
       </div>
-      <BuildStatus items={[
-        { label: 'WorldModelQueryService', state: 'planned' },
-        { label: 'Graph person-entity type', state: 'built' },
-        { label: 'People view → live graph query', state: 'built' },
-        { label: 'Relationship timeline', state: 'planned' },
-      ]} />
+      <HudPanel label="Build status" code="02" className="mt-6">
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            { label: 'WorldModelQueryService', state: 'planned' as const },
+            { label: 'Graph person-entity type', state: 'built' as const },
+            { label: 'People view → live graph query', state: 'built' as const },
+            { label: 'Relationship timeline', state: 'planned' as const },
+          ] as const).map(it => (
+            <span key={it.label}
+              className={`font-hud text-[9.5px] px-2.5 py-1 tracking-[0.12em] uppercase border ${
+                it.state === 'built' ? 'text-cyan-300/80 bg-cyan-500/10 border-cyan-400/20'
+                : 'text-cyan-200/75 bg-cyan-400/[0.07] border-cyan-300/20'
+              }`}
+              style={{ ...chamfer(6) }}>
+              <span className="mr-1.5 opacity-60 text-[8px]">{it.state === 'built' ? '✓' : '○'}</span>
+              {it.label}
+            </span>
+          ))}
+        </div>
+      </HudPanel>
     </ScreenShell>
   )
 }
@@ -855,14 +897,28 @@ export function SettingsScreen() {
         <WebAppCard app="linkedin" name="LinkedIn" desc="Opens LinkedIn in a dedicated window — log in once, stays signed in." />
 
       </div>
-      <BuildStatus items={[
-        { label: 'OllamaService config', state: 'built' },
-        { label: 'Multi-account service', state: 'built' },
-        { label: 'GitHub connector', state: 'built' },
-        { label: 'Email / WhatsApp connectors', state: 'planned' },
-        { label: 'Settings persistence', state: 'planned' },
-        { label: 'Identity Layer (pikuIdentity v8)', state: 'planned' },
-      ]} />
+      <HudPanel label="Build status" code="06" className="mt-6">
+        <div className="flex flex-wrap gap-1.5">
+          {([
+            { label: 'OllamaService config', state: 'built' as const },
+            { label: 'Multi-account service', state: 'built' as const },
+            { label: 'GitHub connector', state: 'built' as const },
+            { label: 'Email / WhatsApp connectors', state: 'planned' as const },
+            { label: 'Settings persistence', state: 'planned' as const },
+            { label: 'Identity Layer (pikuIdentity v8)', state: 'planned' as const },
+          ] as const).map(it => (
+            <span key={it.label}
+              className={`font-hud text-[9.5px] px-2.5 py-1 tracking-[0.12em] uppercase border ${
+                it.state === 'built' ? 'text-cyan-300/80 bg-cyan-500/10 border-cyan-400/20'
+                : 'text-cyan-200/75 bg-cyan-400/[0.07] border-cyan-300/20'
+              }`}
+              style={{ ...chamfer(6) }}>
+              <span className="mr-1.5 opacity-60 text-[8px]">{it.state === 'built' ? '✓' : '○'}</span>
+              {it.label}
+            </span>
+          ))}
+        </div>
+      </HudPanel>
     </ScreenShell>
   )
 }

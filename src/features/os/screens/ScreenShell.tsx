@@ -1,4 +1,5 @@
 import type { ReactNode } from 'react'
+import { chamfer } from '../Hud'
 
 // Shared layout for every non-dashboard OS surface: a header + content,
 // matching the Dashboard's width, padding and type scale.
@@ -32,14 +33,16 @@ export function BuildStatus({ items }: { items: { label: string; state: BuildSta
     active:  'text-cyan-200 bg-cyan-500/12 border-cyan-400/25',
     planned: 'text-cyan-200/75 bg-cyan-400/[0.07] border-cyan-300/20',
   }
-  const dot: Record<BuildState, string> = { built: '✓ built', active: '◆ active', planned: '○ to build' }
+  const dot: Record<BuildState, string> = { built: '✓', active: '◆', planned: '○' }
   return (
-    <div className="mt-6 rounded-2xl bg-white/[0.02] border border-white/8 px-4 py-3">
-      <div className="text-[11px] uppercase tracking-wider text-white/35 mb-2">Build status — what powers this screen</div>
+    <div className="mt-6 px-4 py-3.5"
+      style={{ ...chamfer(10), background: 'rgba(255,255,255,0.02)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.18)' }}>
+      <div className="font-hud text-[10px] uppercase tracking-[0.22em] text-cyan-300/55 mb-2.5">Build status — what powers this screen</div>
       <div className="flex flex-wrap gap-1.5">
         {items.map(it => (
-          <span key={it.label} className={`text-[11px] px-2 py-1 rounded-lg border ${tone[it.state]}`}>
-            <span className="mr-1.5 opacity-60 text-[9px] uppercase tracking-wide">{dot[it.state]}</span>{it.label}
+          <span key={it.label} className={`font-hud text-[9.5px] px-2.5 py-1 tracking-[0.12em] uppercase border ${tone[it.state]}`}
+            style={{ ...chamfer(6) }}>
+            <span className="mr-1.5 opacity-60 text-[8px]">{dot[it.state]}</span>{it.label}
           </span>
         ))}
       </div>

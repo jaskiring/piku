@@ -193,8 +193,41 @@ class OllamaService {
       let answer   = ''
       let thinking = ''
 
-      // qwen3 via Ollama streams reasoning in a separate `thinking` field and the
-      // final answer in `content`. Each chunk carries the new delta for either.
+      // qwen3 normally streams reasoning in a separate `thinking` field and the answer in
+      // `content` — but it inconsistently emits inline <think>…</think> blocks *inside* content.
+      // Split those out live so the chat answer pane never shows raw reasoning, routing think-text
+      // to onThinking instead. `pending`/`inThink` carry state across chunks (tags can be split).
+      let pending = ''
+      let inThink = false
+      const processContent = (delta: string) => {
+        pending += delta
+        while (pending) {
+          if (!inThink) {
+            const open = pending.indexOf('<think>')
+            if (open === -1) {
+              const safe = keepTagBoundary(pending, '<think>')
+              if (safe) { answer += safe; onChunk(safe); pending = pending.slice(safe.length) }
+              break
+            }
+            const before = pending.slice(0, open)
+            if (before) { answer += before; onChunk(before) }
+            pending = pending.slice(open + '<think>'.length)
+            inThink = true
+          } else {
+            const close = pending.indexOf('</think>')
+            if (close === -1) {
+              const safe = keepTagBoundary(pending, '</think>')
+              if (safe) { thinking += safe; onThinking?.(safe); pending = pending.slice(safe.length) }
+              break
+            }
+            const before = pending.slice(0, close)
+            if (before) { thinking += before; onThinking?.(before) }
+            pending = pending.slice(close + '</think>'.length)
+            inThink = false
+          }
+        }
+      }
+
       while (true) {
         const { done, value } = await reader.read()
         if (done) break
@@ -205,14 +238,19 @@ class OllamaService {
             const msg = (JSON.parse(line) as { message?: { content?: string; thinking?: string } }).message
             if (!msg) continue
             if (msg.thinking) { thinking += msg.thinking; onThinking?.(msg.thinking) }
-            if (msg.content)  { answer   += msg.content;  onChunk(msg.content) }
+            if (msg.content)  processContent(msg.content)
           } catch { /* malformed NDJSON line — skip */ }
         }
+      }
+      // Flush any buffered tail (stream ended without a closing tag).
+      if (pending) {
+        if (inThink) { thinking += pending; onThinking?.(pending) }
+        else         { answer   += pending; onChunk(pending) }
       }
 
       const latencyMs = Date.now() - start
       logger.ollama('chat stream complete', { chars: answer.length, thinkingChars: thinking.length, latencyMs })
-      return { response: answer.trim(), thinking: thinking.trim(), latencyMs }
+      return { response: stripThinkingTokens(answer).trim(), thinking: thinking.trim(), latencyMs }
 
     } catch (err) {
       logger.error('chat stream failed', { error: String(err) })
@@ -386,4 +424,15 @@ function sleep(ms: number): Promise<void> {
 // Strip them so users never see raw reasoning tokens.
 function stripThinkingTokens(text: string): string {
   return text.replace(/<think>[\s\S]*?<\/think>/g, '').trim()
+}
+
+// While streaming, a tag like `<think>` can be split across chunk boundaries. Return the prefix of
+// `buf` that is safe to emit now — i.e. everything except a trailing substring that could be the
+// start of `tag` still arriving. The held-back partial stays buffered until the next delta.
+function keepTagBoundary(buf: string, tag: string): string {
+  const max = Math.min(tag.length - 1, buf.length)
+  for (let k = max; k > 0; k--) {
+    if (tag.startsWith(buf.slice(buf.length - k))) return buf.slice(0, buf.length - k)
+  }
+  return buf
 }

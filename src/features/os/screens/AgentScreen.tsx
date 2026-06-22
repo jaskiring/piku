@@ -498,7 +498,7 @@ export function AgentScreen() {
                   )}
                   <span className="font-hud text-[8.5px] text-white/35 shrink-0">{n}</span>
                   <button onClick={() => { setRenameDraft(p.name); setRenamingId(p.id) }} title="Rename project"
-                    className="font-hud text-[10px] text-white/25 group-hover/pb:text-fuchsia-200 transition-colors shrink-0">✎</button>
+                    className="font-hud text-[11px] text-fuchsia-300/55 hover:text-fuchsia-100 transition-colors shrink-0">✎</button>
                 </div>
               )
             })}
