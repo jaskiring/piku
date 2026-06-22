@@ -67,7 +67,6 @@ export function CanvasScreen() {
   const [persona, setPersona] = useState<Persona>(() => (localStorage.getItem(LS_PERSONA) as Persona) || 'office')
   const [geom, setGeom] = useState<Record<PanelId, Geom> | null>(null)
   const [expanded, setExpanded] = useState<PanelId | null>(null)
-  const [focused, setFocused] = useState<PanelId | null>(null)   // the app you're "in" — only it captures two-finger scroll
   const [, force] = useReducer(n => n + 1, 0)
   const zTop = useRef(4)
   const interacting = useRef(false)
@@ -121,26 +120,28 @@ export function CanvasScreen() {
     const gg = exp === id ? { x: 8, y: 8, w: sr.width - 16, h: sr.height - 16 } : g[id]
     return { x: sr.left + gg.x, y: sr.top + gg.y + TITLEBAR, w: gg.w, h: Math.max(1, gg.h - TITLEBAR) }
   }
-  // Only the FOCUSED embed is live (it captures two-finger scroll); every other embed is parked so the
-  // canvas pans freely and the panel below shows a clickable card. Click an app to focus it; release
-  // via its titlebar toggle. This is the fix for embeds trapping scroll.
+  // ALL embeds are live + visible together (each app scrolls inside its own panel). Native webviews
+  // paint above the DOM and can't be clipped, so we park the one being dragged (the DOM placeholder
+  // stands in) and reposition it on drop.
   useEffect(() => {
     if (!geom) return
     for (const id of EMBED_IDS) {
-      if (id === focused) {
-        const r = rectOf(id, geom, expanded)
-        if (r) void tauriInvoke('embed_panel', { label: id, url: embedUrl(id), x: r.x, y: r.y, w: r.w, h: r.h })
-      } else {
-        void tauriInvoke('hide_embed', { label: id })
-      }
+      const r = rectOf(id, geom, expanded)
+      const hidden = expanded != null && expanded !== id
+      if (hidden || !r) { void tauriInvoke('hide_embed', { label: id }); continue }
+      void tauriInvoke('embed_panel', { label: id, url: embedUrl(id), x: r.x, y: r.y, w: r.w, h: r.h })
     }
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [focused])
-  // reposition the focused embed on geometry / expand changes (skip mid-gesture — drag parks it)
+  }, [geom !== null])
+  // reposition every embed on geometry / expand changes (skip mid-gesture — the drag handler parks the dragged one)
   useEffect(() => {
-    if (!geom || !focused || interacting.current) return
-    const r = rectOf(focused, geom, expanded)
-    if (r) void tauriInvoke('reposition_embed', { label: focused, x: r.x, y: r.y, w: r.w, h: r.h })
+    if (!geom || interacting.current) return
+    for (const id of EMBED_IDS) {
+      const r = rectOf(id, geom, expanded)
+      const hidden = expanded != null && expanded !== id
+      if (hidden || !r) { void tauriInvoke('hide_embed', { label: id }); continue }
+      void tauriInvoke('reposition_embed', { label: id, x: r.x, y: r.y, w: r.w, h: r.h })
+    }
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [geom, expanded])
   // park every embed when leaving the Apps screen
@@ -156,7 +157,7 @@ export function CanvasScreen() {
     const gx = geom[id]
     gesture.current = { id, mode, px: e.clientX, py: e.clientY, ox: gx.x, oy: gx.y, ow: gx.w, oh: gx.h }
     interacting.current = true
-    if (focused) void tauriInvoke('hide_embed', { label: focused })   // park the live embed during drag; reshown on drop
+    if (EMBED_IDS.includes(id)) void tauriInvoke('hide_embed', { label: id })   // park the dragged embed; reshown on drop
     bringToFront(id)
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -237,15 +238,6 @@ export function CanvasScreen() {
                       style={{ boxShadow: `inset 0 0 0 1px rgba(${accent},0.3)` }}
                       title="Open the real, logged-in app docked here">⧉ real</button>
                   )}
-                  {EMBED_IDS.includes(meta.id) && (
-                    <button onClick={(e) => { e.stopPropagation(); setFocused(focused === meta.id ? null : meta.id) }}
-                      onPointerDown={(e) => e.stopPropagation()}
-                      className="font-hud text-[9px] uppercase tracking-wider px-1.5 py-0.5 transition-colors"
-                      style={focused === meta.id ? { color: `rgb(${accent})`, boxShadow: `inset 0 0 0 1px rgba(${accent},0.55)` } : { color: 'rgba(255,255,255,0.4)' }}
-                      title={focused === meta.id ? 'release — scroll the canvas freely' : 'enter — scroll inside this app'}>
-                      {focused === meta.id ? '◉ live' : '○ enter'}
-                    </button>
-                  )}
                   <button onClick={() => toggleExpand(meta.id)} className="text-white/40 hover:text-cyan-200 text-xs px-1" title={expanded === meta.id ? 'restore' : 'expand'}>{expanded === meta.id ? '▢' : '⤢'}</button>
                 </div>
               </div>
@@ -253,7 +245,7 @@ export function CanvasScreen() {
               <div className="flex-1 min-h-0 relative">
                 {meta.id === 'gmail' ? <GmailPanelBody persona={persona} accent={accent} onOpen={() => void dockApp('gmail')} />
                   : meta.id === 'github' ? <GitHubPanelBody persona={persona} />
-                  : <EmbedPanelBody name={meta.name} accent={accent} live={focused === meta.id} onEnter={() => setFocused(meta.id)} />}
+                  : <EmbedPanelBody name={meta.name} accent={accent} />}
               </div>
               {/* resize handle (bottom-right) */}
               {expanded !== meta.id && (
@@ -336,22 +328,13 @@ function GmailPanelBody({ persona, accent, onOpen }: { persona: Persona; accent:
   )
 }
 
-// Embed body: when NOT focused, a clickable card (click → focus → the real webview appears on top and
-// captures scroll). When focused, the webview paints over this; we only peek at the bottom edge.
-function EmbedPanelBody({ name, accent, live, onEnter }: { name: string; accent: string; live: boolean; onEnter: () => void }) {
-  if (live) {
-    return (
-      <div className="absolute inset-0 flex items-end justify-center pb-1.5 pointer-events-none">
-        <span className="font-hud text-[8px] uppercase tracking-wider text-white/20">live · scroll works in {name} · ◉ in titlebar to release</span>
-      </div>
-    )
-  }
+// Placeholder shown BEHIND the live embedded webview — visible only while the embed is parked during a drag.
+function EmbedPanelBody({ name, accent }: { name: string; accent: string }) {
   return (
-    <button onClick={onEnter} className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6">
-      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.55)` }}>{name}</span>
-      <span className="font-hud text-[9.5px] uppercase tracking-wider px-3 py-1.5" style={{ color: `rgba(${accent},0.85)`, boxShadow: `inset 0 0 0 1px rgba(${accent},0.3)` }}>click to open →</span>
-      <span className="font-hud text-[8px] text-white/25 uppercase tracking-wider">then scroll / click inside {name}</span>
-    </button>
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6 pointer-events-none">
+      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.5)` }}>{name}</span>
+      <span className="font-hud text-[9px] text-white/25 uppercase tracking-wider">loading · inside Piku</span>
+    </div>
   )
 }
 

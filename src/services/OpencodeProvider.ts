@@ -1,5 +1,83 @@
 import { logger } from '../lib/logger'
 
+// ---------------------------------------------------------------------------
+// Meta-preamble strip — removes a contiguous leading block of sentences where
+// the model narrates its own plan or talks about the user in the third person,
+// e.g. "The user wants…", "Let me give them…", "I'll just answer directly…".
+// These are signs the model leaked its chain-of-thought into the answer field.
+//
+// Only the LEADING contiguous block is removed, never mid-reply content.
+// Stripped text is returned separately so the caller can route it to onThinking.
+// ---------------------------------------------------------------------------
+
+const META_PREAMBLE_PATTERNS = [
+  /^The user wants\b/i,
+  /^The user needs\b/i,
+  /^The user is\b/i,
+  /^Let me\b/i,
+  /^Let's give\b/i,
+  /^I'll /i,
+  /^I will /i,
+  /^I should\b/i,
+  /^I don'?t need\b/i,
+  /^I need to\b/i,
+  /^Okay,? so\b/i,
+  /^First,? I\b/i,
+  /^So,? the user\b/i,
+  /^They want\b/i,
+  /^They need\b/i,
+]
+
+/**
+ * Split `text` into { preamble, answer }.
+ * `preamble` is the leading block of meta-narration sentences (may be empty).
+ * `answer`   is the rest — the first genuine first-person/direct reply.
+ *
+ * Algorithm:
+ *  1. Split on sentence-ending punctuation (. ! ?) followed by whitespace or end.
+ *  2. Walk sentences from the top; as long as each sentence matches any META pattern,
+ *     accumulate it into preamble.  Stop at the first non-matching sentence.
+ *  3. Re-join preamble and answer separately.
+ */
+export function stripMetaPreamble(text: string): { preamble: string; answer: string } {
+  // Quick bail — no match anywhere near the start saves the split cost.
+  const first200 = text.slice(0, 200)
+  if (!META_PREAMBLE_PATTERNS.some(p => p.test(first200.trimStart()))) {
+    return { preamble: '', answer: text }
+  }
+
+  // Sentence tokeniser: split keeping the delimiter so we can reassemble losslessly.
+  // Matches end-of-sentence punctuation followed by one or more whitespace chars (or end).
+  const sentenceRe = /(?<=[.!?])\s+/g
+  const sentences: string[] = []
+  let last = 0
+  let m: RegExpExecArray | null
+  while ((m = sentenceRe.exec(text)) !== null) {
+    sentences.push(text.slice(last, m.index + 1).trimEnd())  // include trailing punct
+    last = m.index + m[0].length
+  }
+  if (last < text.length) sentences.push(text.slice(last))   // final fragment
+
+  let cutIdx = 0
+  for (const s of sentences) {
+    const trimmed = s.trimStart()
+    if (META_PREAMBLE_PATTERNS.some(p => p.test(trimmed))) {
+      cutIdx++
+    } else {
+      break
+    }
+  }
+
+  if (cutIdx === 0) return { preamble: '', answer: text }
+  if (cutIdx >= sentences.length) return { preamble: text.trim(), answer: '' }
+
+  const preamble = sentences.slice(0, cutIdx).join(' ').trim()
+  const answer   = sentences.slice(cutIdx).join(' ').trim()
+  return { preamble, answer }
+}
+
+// ---------------------------------------------------------------------------
+
 // Piku's "deep-thinking" brain. The local 4B (OllamaService) is fast + private but a weak reasoner;
 // for real thinking we hand the turn to a free, capable model (DeepSeek / MiMo / …) through a
 // headless `opencode serve` HTTP API. Piku still OWNS the context locally (World Model + summary)
@@ -83,8 +161,11 @@ class OpencodeProvider {
     // to the thinking panel, never into the chat answer.
     answer = answer.replace(/<think>([\s\S]*?)<\/think>/gi, (_m, r) => { reasoning += r; return '' })
                    .replace(/<\/?think>/gi, '').trim()
+    // Strip any leading meta-preamble (model talking about the user / narrating its plan).
+    const { preamble: metaPre, answer: cleanAnswer } = stripMetaPreamble(answer)
+    if (metaPre && onThinking) onThinking('\n[preamble stripped]\n' + metaPre)
     if (reasoning && onThinking) onThinking(reasoning.trim())
-    return answer
+    return cleanAnswer || answer   // fallback to original if strip ate everything
   }
 
   /**
@@ -190,7 +271,17 @@ class OpencodeProvider {
 
       if (idleTimer) clearTimeout(idleTimer)
       void lastDeltaAt // suppress unused-variable lint (read above in armIdle closure)
-      return loopResult
+
+      // Post-process: strip any leading meta-preamble from the fully-accumulated answer.
+      // The live onContent callbacks may have already emitted the preamble to the UI — the caller
+      // (AgentScreen.runBrain) uses the RETURNED value to set the turn text, so stripping here
+      // ensures the persisted turn is clean. A future enhancement could buffer the first few
+      // sentences live, but for now we strip post-hoc and route the preamble to onThinking.
+      const { preamble: streamPre, answer: streamClean } = stripMetaPreamble(loopResult)
+      if (streamPre) {
+        onThinking?.('\n[preamble stripped]\n' + streamPre)
+      }
+      return streamClean || loopResult   // fallback if strip ate everything
     } finally {
       clearTimeout(hardTimer)
     }
