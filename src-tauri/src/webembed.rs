@@ -27,6 +27,8 @@ pub fn embed_panel(app: tauri::AppHandle, label: String, url: String, x: f64, y:
     let id = format!("embed-{label}");
 
     if let Some(wv) = app.get_webview(&id) {
+        // Already mounted — navigate (handles the office/personal account switch) + reposition + show.
+        let _ = wv.navigate(parsed);
         wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
         wv.set_size(LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
         let _ = wv.show();
@@ -49,6 +51,7 @@ pub fn reposition_embed(app: tauri::AppHandle, label: String, x: f64, y: f64, w:
     if let Some(wv) = app.get_webview(&format!("embed-{label}")) {
         wv.set_position(LogicalPosition::new(x, y)).map_err(|e| e.to_string())?;
         wv.set_size(LogicalSize::new(w.max(1.0), h.max(1.0))).map_err(|e| e.to_string())?;
+        let _ = wv.show();   // reposition implies visible — re-show a parked embed after a drag/resize
     }
     Ok(())
 }

@@ -6,6 +6,7 @@ mod opencode;
 mod os_tools;
 mod tts;
 mod tray_manager;
+mod vault;
 mod webembed;
 mod webwin;
 mod window_manager;
@@ -23,7 +24,12 @@ pub fn run() {
             os_tools::open_path,
             os_tools::open_in_app,
             os_tools::open_in_piku_chrome,
+            os_tools::dock_chrome_app,
             os_tools::copy_to_clipboard,
+            vault::vault_ensure,
+            vault::vault_write,
+            vault::vault_read,
+            vault::vault_list,
             os_tools::list_dir,
             os_tools::fetch_url,
             os_tools::web_headlines,

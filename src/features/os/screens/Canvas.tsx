@@ -1,6 +1,5 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
-import type { MailSummary } from '../../../services/accounts'
-import { accountService, gmailConnector, gitHubConnector } from '../../../services/accounts'
+import { accountService, gitHubConnector } from '../../../services/accounts'
 
 // The Apps "chart paper": a freeform canvas of draggable + resizable panels, all INSIDE Piku.
 // Gmail + GitHub are native React panels scoped to the active persona (Office/Personal); WhatsApp +
@@ -22,11 +21,13 @@ const LS_LAYOUT = 'piku.canvas.layout.v1'
 const LS_PERSONA = 'piku.canvas.persona'
 
 const PANELS: { id: PanelId; name: string; kind: 'dom' | 'embed' }[] = [
-  { id: 'gmail',    name: 'Gmail',    kind: 'dom' },
-  { id: 'github',   name: 'GitHub',   kind: 'dom' },
-  { id: 'whatsapp', name: 'WhatsApp', kind: 'dom' },
-  { id: 'linkedin', name: 'LinkedIn', kind: 'dom' },
+  { id: 'gmail',    name: 'Gmail',    kind: 'dom' },    // Google blocks webview sign-in → '⧉ real' docks the real logged-in Chrome Gmail
+  { id: 'github',   name: 'GitHub',   kind: 'dom' },    // API summary + ⧉ real
+  { id: 'whatsapp', name: 'WhatsApp', kind: 'embed' },  // embedded web app, inside Piku
+  { id: 'linkedin', name: 'LinkedIn', kind: 'embed' },  // embedded web app, inside Piku
 ]
+// Panels rendered as real, in-Piku embedded webviews (vs API-backed DOM panels).
+const EMBED_IDS: PanelId[] = PANELS.filter(p => p.kind === 'embed').map(p => p.id)
 
 const clamp = (v: number, lo: number, hi: number) => Math.max(lo, Math.min(hi, v))
 const snap = (v: number) => Math.round(v / GRID) * GRID
@@ -82,6 +83,67 @@ export function CanvasScreen() {
   useEffect(() => { if (geom) { const id = setTimeout(() => { try { localStorage.setItem(LS_LAYOUT, JSON.stringify(geom)) } catch { /* quota */ } }, 150); return () => clearTimeout(id) } }, [geom])
   useEffect(() => { localStorage.setItem(LS_PERSONA, persona) }, [persona])
 
+  // ── Embedded web apps, INSIDE Piku ──────────────────────────────────────────
+  // WhatsApp/LinkedIn (non-Google → fine in an embedded webview) render as native child webviews
+  // (webembed.rs) positioned over their panel body, so the real logged-in site is usable in-place.
+  // Gmail/GitHub stay on the API (Gmail MCP-style) — Google login can't run in an embedded webview.
+  // Native webviews paint above the DOM + can't be clipped, so we park them during drag and on leave;
+  // the DOM placeholder behind stands in.
+  const TITLEBAR = 34
+  const tauriInvoke = async (cmd: string, args: Record<string, unknown>) => {
+    try { const { invoke } = await import('@tauri-apps/api/core'); return await invoke(cmd, args) } catch { return null }
+  }
+  const embedUrl = (id: PanelId) => (id === 'whatsapp' ? 'https://web.whatsapp.com' : 'https://www.linkedin.com/feed/')
+  // Gmail/GitHub can't run in an embedded webview (Google blocks login), so "dock" the REAL logged-in
+  // Chrome app window onto the panel's on-screen rect — full real app, inside Piku's frame.
+  const dockUrl = (id: PanelId) =>
+    id === 'gmail'  ? `https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}`
+    : id === 'github' ? `https://github.com/${GH[persona]}`
+    : embedUrl(id)
+  const dockApp = async (id: PanelId) => {
+    if (!geom) return
+    const sr = surfaceRef.current?.getBoundingClientRect(); if (!sr) return
+    const g = expanded === id ? { x: 8, y: 8, w: sr.width - 16, h: sr.height - 16 } : geom[id]
+    try {
+      const { invoke } = await import('@tauri-apps/api/core')
+      const { getCurrentWindow } = await import('@tauri-apps/api/window')
+      const win = getCurrentWindow()
+      const pos = await win.outerPosition(); const scale = await win.scaleFactor()
+      const x = pos.x / scale + sr.left + g.x
+      const y = pos.y / scale + sr.top + g.y + TITLEBAR
+      await invoke('dock_chrome_app', { url: dockUrl(id), x, y, w: g.w, h: Math.max(240, g.h - TITLEBAR) })
+    } catch { /* not in the desktop app */ }
+  }
+  const rectOf = (id: PanelId, g: Record<PanelId, Geom>, exp: PanelId | null) => {
+    const sr = surfaceRef.current?.getBoundingClientRect(); if (!sr) return null
+    const gg = exp === id ? { x: 8, y: 8, w: sr.width - 16, h: sr.height - 16 } : g[id]
+    return { x: sr.left + gg.x, y: sr.top + gg.y + TITLEBAR, w: gg.w, h: Math.max(1, gg.h - TITLEBAR) }
+  }
+  // create/navigate the embeds once geometry is known
+  useEffect(() => {
+    if (!geom) return
+    for (const id of EMBED_IDS) {
+      const r = rectOf(id, geom, expanded)
+      const hidden = expanded != null && expanded !== id
+      if (hidden || !r) { void tauriInvoke('hide_embed', { label: id }); continue }
+      void tauriInvoke('embed_panel', { label: id, url: embedUrl(id), x: r.x, y: r.y, w: r.w, h: r.h })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geom !== null])
+  // reposition on geometry / expand changes (skip mid-gesture — the drag handler parks them)
+  useEffect(() => {
+    if (!geom || interacting.current) return
+    for (const id of EMBED_IDS) {
+      const r = rectOf(id, geom, expanded)
+      const hidden = expanded != null && expanded !== id
+      if (hidden || !r) { void tauriInvoke('hide_embed', { label: id }); continue }
+      void tauriInvoke('reposition_embed', { label: id, x: r.x, y: r.y, w: r.w, h: r.h })
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [geom, expanded])
+  // park every embed when leaving the Apps screen
+  useEffect(() => () => { void tauriInvoke('hide_all_embeds', {}) }, [])
+
   if (!geom) return <div ref={surfaceRef} className="absolute inset-0" />
 
   const bringToFront = (id: PanelId) => setGeom(g => g && ({ ...g, [id]: { ...g[id], z: ++zTop.current } }))
@@ -92,6 +154,7 @@ export function CanvasScreen() {
     const gx = geom[id]
     gesture.current = { id, mode, px: e.clientX, py: e.clientY, ox: gx.x, oy: gx.y, ow: gx.w, oh: gx.h }
     interacting.current = true
+    if (EMBED_IDS.includes(id)) void tauriInvoke('hide_embed', { label: id })   // park the embed; placeholder shows while dragging
     bringToFront(id)
   }
   const onPointerMove = (e: React.PointerEvent) => {
@@ -165,13 +228,21 @@ export function CanvasScreen() {
                   <span className="w-1.5 h-1.5" style={{ background: `rgb(${accent})`, boxShadow: `0 0 7px rgba(${accent},0.7)` }} />
                   {meta.name}
                 </span>
-                <button onClick={() => toggleExpand(meta.id)} className="text-white/40 hover:text-cyan-200 text-xs px-1" title={expanded === meta.id ? 'restore' : 'expand'}>{expanded === meta.id ? '▢' : '⤢'}</button>
+                <div className="flex items-center gap-1.5">
+                  {(meta.id === 'gmail' || meta.id === 'github') && (
+                    <button onClick={() => void dockApp(meta.id)}
+                      className="font-hud text-[9px] uppercase tracking-wider text-cyan-300/70 hover:text-cyan-100 px-1.5 py-0.5 transition-colors"
+                      style={{ boxShadow: `inset 0 0 0 1px rgba(${accent},0.3)` }}
+                      title="Open the real, logged-in app docked here">⧉ real</button>
+                  )}
+                  <button onClick={() => toggleExpand(meta.id)} className="text-white/40 hover:text-cyan-200 text-xs px-1" title={expanded === meta.id ? 'restore' : 'expand'}>{expanded === meta.id ? '▢' : '⤢'}</button>
+                </div>
               </div>
               {/* body */}
               <div className="flex-1 min-h-0 relative">
-                {meta.id === 'gmail' ? <GmailPanelBody persona={persona} />
+                {meta.id === 'gmail' ? <GmailDockPrompt persona={persona} accent={accent} onOpen={() => void dockApp('gmail')} />
                   : meta.id === 'github' ? <GitHubPanelBody persona={persona} />
-                  : <LauncherPanelBody name={meta.name} url={meta.id === 'whatsapp' ? 'https://web.whatsapp.com' : 'https://www.linkedin.com/feed/'} accent={accent} />}
+                  : <LauncherPanelBody name={meta.name} accent={accent} />}
               </div>
               {/* resize handle (bottom-right) */}
               {expanded !== meta.id && (
@@ -187,82 +258,33 @@ export function CanvasScreen() {
   )
 }
 
-const openInChrome = async (url: string) => {
-  try {
-    const { invoke } = await import('@tauri-apps/api/core');
-    await invoke('open_in_piku_chrome', { url });   // Piku's dedicated, logged-in Chrome profile
-  } catch {}
-}
-
-function LauncherPanelBody({ name, url, accent }: { name: string; url: string; accent: string }) {
+// Gmail can't sign in inside an embedded webview (Google blocks it), so this clean prompt docks the
+// REAL logged-in Chrome Gmail into the panel via dock_chrome_app (Chrome CAN sign into Google).
+function GmailDockPrompt({ persona, accent, onOpen }: { persona: Persona; accent: string; onOpen: () => void }) {
   return (
-    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6">
-      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.5)` }}>{name}</span>
-      <button onClick={() => openInChrome(url)}
-        className="font-hud text-[11px] uppercase tracking-wider px-4 py-2 transition-colors"
-        style={{ color: `rgba(${accent},0.8)`, border: `1px solid rgba(${accent},0.3)` }}>
-        Open in browser →
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-3 px-6 text-center">
+      <span className="font-hud text-[13px] uppercase tracking-[0.22em]" style={{ color: `rgba(${accent},0.6)` }}>Gmail · {persona}</span>
+      <span className="text-[11.5px] text-white/45 leading-relaxed max-w-[250px]">Google won't allow sign-in inside an embedded view — so open your real, logged-in Gmail docked right here:</span>
+      <button onClick={onOpen}
+        className="font-hud text-[11px] uppercase tracking-wider px-4 py-2 transition-colors hover:brightness-125"
+        style={{ color: `rgba(${accent},0.9)`, boxShadow: `inset 0 0 0 1px rgba(${accent},0.45)` }}>
+        ⧉ Open real Gmail here →
       </button>
-      <span className="font-hud text-[9px] text-white/20 uppercase tracking-wider">opens your logged-in Chrome</span>
+      <span className="font-hud text-[8.5px] text-white/25 uppercase tracking-wider">{EMAIL[persona]}</span>
     </div>
   )
 }
 
-function mailTime(raw: string): string {
-  const d = new Date(raw); if (isNaN(d.getTime())) return ''
-  const now = new Date()
-  return d.toDateString() === now.toDateString()
-    ? d.toLocaleTimeString(undefined, { hour: 'numeric', minute: '2-digit' })
-    : d.toLocaleDateString(undefined, { month: 'short', day: 'numeric' })
-}
-
-function GmailPanelBody({ persona }: { persona: Persona }) {
-  const [mail, setMail] = useState<MailSummary[] | null>(null)
-  const [missing, setMissing] = useState(false)
-  useEffect(() => {
-    let c = false; setMail(null); setMissing(false)
-    void (async () => {
-      const accts = await accountService.getByService('email')
-      const a = accts.find(x => (x.email ?? '').toLowerCase() === EMAIL[persona])
-      if (!a || !a.token) { if (!c) setMissing(true); return }
-      try { const m = await gmailConnector.search(a, 'in:inbox newer_than:14d', 30); if (!c) setMail(m) } catch { if (!c) setMail([]) }
-    })()
-    return () => { c = true }
-  }, [persona])
+// Placeholder shown BEHIND the embedded webview (visible only while dragging, when the embed is parked).
+function LauncherPanelBody({ name, accent }: { name: string; accent: string }) {
   return (
-    <div className="absolute inset-0 flex flex-col">
-      <div className="flex items-center justify-between px-3 py-1.5 border-b border-white/[0.06] shrink-0">
-        <span className="font-hud text-[10px] text-white/30 uppercase tracking-wider">inbox (14d)</span>
-        <button onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}`)}
-          className="font-hud text-[10px] uppercase tracking-wider text-cyan-300/60 hover:text-cyan-200">
-          Open Gmail →
-        </button>
-      </div>
-      <div className="flex-1 overflow-y-auto px-3 py-1">
-        {missing ? <div className="text-[11px] text-amber-300/60 p-2">No {persona} Gmail connected — add {EMAIL[persona]} in Settings → Gmail.</div>
-          : mail === null ? <div className="text-[11px] text-white/30 p-2 font-hud">loading inbox…</div>
-          : mail.length === 0 ? <div className="text-[11px] text-white/30 p-2">inbox empty (14d)</div>
-          : mail.map(m => {
-            const name = (m.from.replace(/<.*>/, '').replace(/"/g, '').trim() || m.from).slice(0, 40)
-            return (
-              <div key={m.id} onClick={() => openInChrome(`https://mail.google.com/mail/u/?authuser=${EMAIL[persona]}#all/${m.id}`)}
-                className="flex items-start gap-2.5 py-2 border-b border-white/[0.04] cursor-pointer hover:bg-white/[0.02]">
-                <span className={`w-6 h-6 rounded-full flex items-center justify-center text-[10px] shrink-0 ${m.unread ? 'bg-cyan-500/25 text-cyan-100' : 'bg-white/10 text-white/50'}`}>{(name[0] || '?').toUpperCase()}</span>
-                <div className="flex-1 min-w-0">
-                  <div className="flex items-center justify-between gap-2">
-                    <span className={`text-[12.5px] truncate ${m.unread ? 'text-white font-medium' : 'text-white/70'}`}>{name}</span>
-                    <span className="text-[10px] text-white/30 shrink-0 font-hud">{mailTime(m.date)}</span>
-                  </div>
-                  <div className={`text-[12px] truncate ${m.unread ? 'text-white/85' : 'text-white/50'}`}>{m.subject}</div>
-                  <div className="text-[11px] text-white/35 truncate">{m.snippet}</div>
-                </div>
-              </div>
-            )
-          })}
-      </div>
+    <div className="absolute inset-0 flex flex-col items-center justify-center gap-2 px-6">
+      <span className="font-hud text-[13px] uppercase tracking-[0.25em]" style={{ color: `rgba(${accent},0.5)` }}>{name}</span>
+      <span className="font-hud text-[9px] text-white/25 uppercase tracking-wider">embedded · inside Piku</span>
     </div>
   )
 }
+
 
 function GitHubPanelBody({ persona }: { persona: Persona }) {
   const [data, setData] = useState<{ total: number; repos: string[] } | null>(null)

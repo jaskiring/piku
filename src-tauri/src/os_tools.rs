@@ -238,6 +238,41 @@ pub fn open_in_piku_chrome(url: String) -> Result<String, String> {
     { let _ = url; Err("open_in_piku_chrome is macOS-only for now".into()) }
 }
 
+/// Dock the REAL logged-in app (e.g. Gmail) INTO Piku: launch a chromeless Chrome "app" window on the
+/// Piku profile, positioned + sized to a panel's on-screen rect (logical screen points). For apps that
+/// Google/etc. refuse to run inside an embedded webview, this still puts the full real app inside
+/// Piku's frame. x,y,w,h are screen-logical coordinates computed on the JS side.
+#[tauri::command]
+pub fn dock_chrome_app(url: String, x: f64, y: f64, w: f64, h: f64) -> Result<String, String> {
+    let url = url.trim().to_string();
+    if url.is_empty() {
+        return Err("no url given".into());
+    }
+    #[cfg(target_os = "macos")]
+    {
+        let dir = home()?.join(".piku/chrome");
+        std::fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
+        let chrome = "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome";
+        Command::new(chrome)
+            .arg(format!("--user-data-dir={}", dir.display()))
+            .arg(format!("--app={url}"))
+            .arg(format!("--window-position={},{}", x.round() as i64, y.round() as i64))
+            .arg(format!(
+                "--window-size={},{}",
+                (w.round() as i64).max(240),
+                (h.round() as i64).max(240)
+            ))
+            .spawn()
+            .map_err(|e| e.to_string())?;
+        Ok(format!("Docked {url} into Piku."))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        let _ = (url, x, y, w, h);
+        Err("dock_chrome_app is macOS-only for now".into())
+    }
+}
+
 /// Copy text to the macOS clipboard (via `pbcopy`). Used by brainstorm-mode handoff so the owner
 /// can paste the prompt into ChatGPT/Claude/Gemini.
 #[tauri::command]
