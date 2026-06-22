@@ -15,6 +15,11 @@ import type { ReasoningFlow } from '../../../services/ReasoningPlanner'
 import { opencodeProvider } from '../../../services/OpencodeProvider'
 import { detectMode, assembleMode, handoffToExternal, MODES } from '../../../services/modes/Modes'
 import type { Mode } from '../../../services/modes/Modes'
+import { MemoryService, ConversationSummaryService } from '../../memory'
+import { graphService } from '../../graph'
+
+const memoryService = new MemoryService()
+const summaryService = new ConversationSummaryService()
 
 const AGENT_SYSTEM_PROMPT = `${PIKU_PERSONA}
 
@@ -97,25 +102,35 @@ export function AgentScreen() {
         const reply = await opencodeProvider.chatStream(
           system, msg, history,
           t => { captured += t; setLiveThinking(p => p + t) },                 // reasoning streams live → panel
-          c => { setPhase('listening'); setLiveAnswer(p => p + c) },           // answer streams live → chat
+          c => { setPhase('speaking'); setLiveAnswer(p => p + c) },           // answer streams live → chat
         )
         if (reply) {
           // Persist the reasoning so it stays visible in the ACT panel after the turn finishes.
           agentHub.setTrace(captured.trim() ? [{ kind: 'thinking', text: captured.trim() }] : [])
           agentHub.addTurn({ role: 'piku', text: reply })
+          void memoryService.processConversationTurn(msg, reply).catch(() => {})
+          void summaryService.onExchange(msg, reply).catch(() => {})
+          void projectService.processConversation(msg, reply).catch(() => {})
+          void graphService.processConversation(msg, reply).catch(() => {})
           if (voiceOut) voiceService.speak(reply)
           return
         }
       }
     } catch { /* fall through to local */ }
+    setLiveAnswer(''); setLiveThinking('');
+    const onTool = (label: string) => { setLiveStatus(label); setPhase('acting') };
     const { reply, trace } = await toolRouter.runWithTools(
       msg, system,
       d => setLiveThinking(p => p + d),
-      d => { setPhase('listening'); setLiveAnswer(p => p + d) },
-      history, true,
+      d => { setPhase('speaking'); setLiveAnswer(p => p + d) },
+      history, true, onTool,
     )
     agentHub.setTrace(trace)
     agentHub.addTurn({ role: 'piku', text: reply || '(done)' })
+    void memoryService.processConversationTurn(msg, reply || '(done)').catch(() => {})
+    void summaryService.onExchange(msg, reply || '(done)').catch(() => {})
+    void projectService.processConversation(msg, reply || '(done)').catch(() => {})
+    void graphService.processConversation(msg, reply || '(done)').catch(() => {})
     if (voiceOut) voiceService.speak(reply)
   }
 
@@ -141,11 +156,15 @@ export function AgentScreen() {
         const { reply, trace } = await toolRouter.runWithTools(
           msg, system,
           d => setLiveThinking(p => p + d),
-          d => { setPhase('listening'); setLiveStatus(''); setLiveAnswer(p => p + d) },
+          d => { setPhase('speaking'); setLiveStatus(''); setLiveAnswer(p => p + d) },
           history, think, onTool,
         )
         agentHub.setTrace(trace)
         agentHub.addTurn({ role: 'piku', text: reply || '(done)' })
+        void memoryService.processConversationTurn(msg, reply || '(done)').catch(() => {})
+        void summaryService.onExchange(msg, reply || '(done)').catch(() => {})
+        void projectService.processConversation(msg, reply || '(done)').catch(() => {})
+        void graphService.processConversation(msg, reply || '(done)').catch(() => {})
         if (voiceOut) voiceService.speak(reply)
       }
 

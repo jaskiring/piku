@@ -35,7 +35,7 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
   const [nodeCount, setNodeCount] = useState<number | null>(null)
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
-  const feed = useConnectorFeed()   // shared connector cache — Gmail + GitHub (calendar TBD)
+  const feed = useConnectorFeed()   // shared connector cache — Gmail + GitHub + Calendar
 
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id) }, [])
 
@@ -197,16 +197,26 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
                   <span className="text-white/30">{feed.loading ? '…' : '—'}</span>
                 </div>
               )}
-              <button onClick={() => onNavigate('calendar')}
-                className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 hover:text-cyan-200 transition-colors text-left">+ Connect calendar</button>
+              {feed.events && feed.events.events.length > 0 ? (
+                feed.events.events.slice(0, 3).map((ev, i) => (
+                  <button key={i} onClick={() => onNavigate('calendar')}
+                    className="flex items-center gap-2 text-left hover:text-cyan-200 transition-colors">
+                    <span className="text-cyan-300/60 tabular-nums shrink-0">{new Date(ev.start).toLocaleTimeString(undefined, { hour: '2-digit', minute: '2-digit' })}</span>
+                    <span className="text-white/70 truncate">{ev.title}</span>
+                  </button>
+                ))
+              ) : !feed.loading ? (
+                <button onClick={() => onNavigate('calendar')}
+                  className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 hover:text-cyan-200 transition-colors text-left">+ Connect calendar</button>
+              ) : null}
             </div>
           </HudPanel>
 
           <HudPanel className="col-span-6 md:col-span-2" label="System" code="06">
             <div className="flex flex-col gap-2.5 font-hud text-[11px]">
               <Stat label="Ollama" value={ollamaUp === null ? 'checking' : ollamaUp ? 'online' : 'offline'} dim={ollamaUp === false} />
-              <Stat label="Brain" value={ACTIVE_BRAIN.model} />
-              <Stat label="Embed" value="nomic-embed" />
+              <Stat label="Brain" value={ACTIVE_BRAIN.model} dim={ollamaUp === false} />
+              <Stat label="Embed" value="nomic-embed-text" dim={ollamaUp === false} />
             </div>
           </HudPanel>
 
@@ -214,9 +224,8 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
 
         {/* status ticker */}
         <div className="flex flex-wrap items-center gap-x-6 gap-y-2 mt-7 font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/30">
-          <Tick dot="bg-fuchsia-400" >Agent idle</Tick>
-          <Tick dot="bg-cyan-400">Memory synced</Tick>
-          <Tick dot="bg-cyan-400">{nodeCount ?? 0} nodes indexed</Tick>
+          <Tick dot={presence === 'acting' || presence === 'thinking' ? 'bg-amber-400' : presence === 'idle' ? 'bg-fuchsia-400' : 'bg-emerald-400'}>Agent {presence}</Tick>
+          <Tick dot="bg-cyan-400">{nodeCount !== null ? `${nodeCount} nodes` : '… nodes'}</Tick>
           {feed.inbox && feed.inbox.messages.filter(m => m.unread).length > 0 && (
             <Tick dot="bg-cyan-400">{feed.inbox.messages.filter(m => m.unread).length} unread</Tick>
           )}

@@ -4,6 +4,7 @@ import { Card } from '../Card'
 import { HudPanel, HudChip, chamfer } from '../Hud'
 import type { NavKey } from '../Sidebar'
 import { ScreenShell, BuildStatus, Hint } from './ScreenShell'
+import { graphService } from '../../graph'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
 import { opencodeProvider, OPENCODE_MODEL } from '../../../services/OpencodeProvider'
@@ -77,7 +78,7 @@ export function ModelsScreen() {
   const defaultModel = ACTIVE_BRAIN.model
 
   return (
-    <ScreenShell title="Models" subtitle="Piku's brains — fast & private on-device, capable & free via opencode." action={<AddBtn label="+ Pull model" />}>
+    <ScreenShell title="Models" subtitle="Piku's brains — fast & private on-device, capable & free via opencode.">
       <div className="grid grid-cols-12 gap-4">
 
         {/* ── Local brain ── */}
@@ -231,6 +232,9 @@ export function DatasetsScreen() {
     <ScreenShell title="Datasets" subtitle="Documents absorbed into Piku's memory and World Model." action={<AddBtn label="+ Add source" />}>
       <div className="grid grid-cols-12 gap-4">
         <Card className="col-span-12" bodyClass="!p-0">
+          <div className="flex items-center gap-2 px-4 pt-2 pb-1">
+            <span className="font-hud text-[9px] uppercase tracking-[0.2em] text-amber-300/80 bg-amber-400/10 border border-amber-400/25 rounded px-2 py-0.5">SAMPLE — not yet wired</span>
+          </div>
           <div className="divide-y divide-white/5">
             {sets.map(s => (
               <div key={s.name} className="flex items-center gap-3 px-4 py-3">
@@ -243,8 +247,8 @@ export function DatasetsScreen() {
         </Card>
       </div>
       <BuildStatus items={[
-        { label: 'DocumentAbsorptionService', state: 'built' },
-        { label: 'DocumentChunker + EntityExtractor', state: 'built' },
+        { label: 'DocumentAbsorptionService', state: 'planned' },
+        { label: 'DocumentChunker + EntityExtractor', state: 'planned' },
         { label: 'Drag-drop ingestion UI', state: 'planned' },
         { label: 'PDF / folder watchers', state: 'planned' },
       ]} />
@@ -439,27 +443,44 @@ function CodingWidget() {
 
 /* ───────────────────────── Files ───────────────────────── */
 export function FilesScreen() {
-  const tree = [
-    { n: 'piku-vault/', d: 'Runtime World Model', t: 'folder' },
-    { n: 'projects/',   d: 'Per-project context', t: 'folder' },
-    { n: 'memories/',   d: 'Extracted memories',  t: 'folder' },
-    { n: 'README.md',   d: 'Vault overview',       t: 'file' },
-  ]
+  const [entries, setEntries] = useState<string[]>([])
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const { invoke } = await import('@tauri-apps/api/core')
+        const result = await invoke<string[]>('list_dir', { path: '' })
+        if (!cancelled) setEntries(result)
+      } catch { /* not in Tauri or command unavailable */ }
+      if (!cancelled) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
   return (
-    <ScreenShell title="Files" subtitle="What Piku has absorbed and where it keeps its world.">
+    <ScreenShell title="Files" subtitle="Live from your home directory via list_dir.">
       <Card className="col-span-12" bodyClass="!p-0">
-        <div className="divide-y divide-white/5">
-          {tree.map(f => (
-            <div key={f.n} className="flex items-center gap-3 px-4 py-2.5">
-              <span className="text-white/40 w-5 text-center">{f.t === 'folder' ? '▸' : '·'}</span>
-              <span className="text-sm text-white/80 flex-1">{f.n}</span>
-              <span className="text-[10px] text-white/35">{f.d}</span>
-            </div>
-          ))}
-        </div>
+        {loading ? (
+          <div className="px-4 py-6 text-center">
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">Scanning home directory…</span>
+          </div>
+        ) : entries.length === 0 ? (
+          <div className="px-4 py-6 text-center">
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">No entries found.</span>
+          </div>
+        ) : (
+          <div className="divide-y divide-white/5">
+            {entries.map(f => (
+              <div key={f} className="flex items-center gap-3 px-4 py-2.5">
+                <span className="text-white/40 w-5 text-center">{f.endsWith('/') ? '▸' : '·'}</span>
+                <span className="text-sm text-white/80 flex-1 font-mono">{f}</span>
+              </div>
+            ))}
+          </div>
+        )}
       </Card>
       <BuildStatus items={[
-        { label: 'IndexedDB stores', state: 'built' },
+        { label: 'list_dir (home) — built', state: 'built' },
         { label: 'Runtime vault (piku-vault/)', state: 'planned' },
         { label: 'File browser + preview', state: 'planned' },
         { label: 'Vault capture (2.5-V)', state: 'planned' },
@@ -559,28 +580,58 @@ export function CalendarScreen() {
 }
 
 /* ───────────────────────── People ───────────────────────── */
+const MOCK_PEOPLE = [
+  { n: 'Jaskirat Singh', r: 'Owner · solo developer', seen: 'now' },
+  { n: 'Salescode team', r: 'Org context',            seen: 'this week' },
+]
 export function PeopleScreen() {
-  const people = [
-    { n: 'Jaskirat Singh', r: 'Owner · solo developer', seen: 'now' },
-    { n: 'Salescode team', r: 'Org context',            seen: 'this week' },
-  ]
+  const [realPeople, setRealPeople] = useState<{ name: string }[] | null>(null)
+  const [loading, setLoading] = useState(true)
+  useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      try {
+        const nodes = await graphService.getAllNodes()
+        if (!cancelled) setRealPeople(nodes.filter(n => n.type === 'person').map(n => ({ name: n.name })))
+      } catch { /* graph unavailable — realPeople stays null */ }
+      if (!cancelled) setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [])
+  const graphAvailable = realPeople !== null
   return (
     <ScreenShell title="People" subtitle="Person-entities Piku knows about, drawn from the World Model graph.">
       <div className="grid grid-cols-12 gap-4">
-        {people.map(p => (
-          <Card key={p.n} className="col-span-12 md:col-span-6 lg:col-span-4">
-            <div className="flex items-center gap-3">
-              <span className="w-10 h-10 rounded-full bg-cyan-400/15 border border-cyan-400/25 flex items-center justify-center text-cyan-200">◍</span>
-              <div className="flex-1 min-w-0"><div className="text-sm text-white/90 truncate">{p.n}</div><div className="text-[10px] text-white/40">{p.r}</div></div>
-              <span className="text-[10px] text-white/30">{p.seen}</span>
-            </div>
-          </Card>
-        ))}
+        {loading ? (
+          <div className="col-span-12 text-center py-8">
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">Querying graph…</span>
+          </div>
+        ) : graphAvailable && realPeople.length === 0 ? (
+          <div className="col-span-12">
+            <Card>
+              <div className="text-sm text-white/50 text-center py-6">
+                No people yet — Piku adds them as it learns about your world.
+              </div>
+            </Card>
+          </div>
+        ) : (
+          (graphAvailable ? realPeople : MOCK_PEOPLE.map(m => ({ name: m.n, r: m.r, seen: m.seen }))).map(p => (
+            <Card key={p.name} className="col-span-12 md:col-span-6 lg:col-span-4">
+              <div className="flex items-center gap-3">
+                <span className="w-10 h-10 rounded-full bg-cyan-400/15 border border-cyan-400/25 flex items-center justify-center text-cyan-200">◍</span>
+                <div className="flex-1 min-w-0"><div className="text-sm text-white/90 truncate">{p.name}</div>
+                  {'r' in p && <div className="text-[10px] text-white/40">{(p as { r?: string }).r}</div>}
+                </div>
+                {'seen' in p && <span className="text-[10px] text-white/30">{(p as { seen?: string }).seen}</span>}
+              </div>
+            </Card>
+          ))
+        )}
       </div>
       <BuildStatus items={[
-        { label: 'WorldModelQueryService', state: 'built' },
+        { label: 'WorldModelQueryService', state: 'planned' },
         { label: 'Graph person-entity type', state: 'built' },
-        { label: 'People view → live graph query', state: 'planned' },
+        { label: 'People view → live graph query', state: 'built' },
         { label: 'Relationship timeline', state: 'planned' },
       ]} />
     </ScreenShell>

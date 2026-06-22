@@ -131,6 +131,7 @@ export function GraphCanvas({ focusGalaxyId, onFocusHandled }: { focusGalaxyId?:
   const [selectedId, setSelectedId] = useState<string | null>(null)
   const [query, setQuery] = useState('')
   const [galaxies, setGalaxies] = useState<Galaxy[]>([])
+  const [isSample, setIsSample] = useState(true)
   const stars = useRef(buildStars()).current
 
   const containerRef = useRef<HTMLDivElement>(null)
@@ -153,13 +154,20 @@ export function GraphCanvas({ focusGalaxyId, onFocusHandled }: { focusGalaxyId?:
     void (async () => {
       try {
         const allNodes = await graphService.getAllNodes()
-        if (cancelled || allNodes.length === 0) return
+        if (cancelled) return
+        if (allNodes.length === 0) {
+          if (!cancelled) setIsSample(true)
+          return
+        }
         const raw: RawNode[] = allNodes.map(n => ({ id: n.id, name: n.name, type: n.type }))
         const confirmed = await graphService.getConfirmedEdges()
         const links: PLink[] = confirmed.map(e => ({ from: e.fromId, to: e.toId }))
         setGraph(buildGraph(raw, links))
         const g = await graphService.getGalaxies()
-        if (!cancelled) setGalaxies(g)
+        if (!cancelled) {
+          setGalaxies(g)
+          setIsSample(false)
+        }
       } catch { /* keep mock */ }
     })()
     return () => { cancelled = true }
@@ -397,6 +405,14 @@ export function GraphCanvas({ focusGalaxyId, onFocusHandled }: { focusGalaxyId?:
         style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(255,255,255,0.07)' }}>
         ⊡ fit
       </button>
+
+      {/* Sample data badge */}
+      {isSample && (
+        <div className="absolute bottom-6 right-6 z-40 font-hud text-[9px] uppercase tracking-[0.15em] text-cyan-400/40 bg-[#0a1120]/70 backdrop-blur-xl px-3 py-1.5"
+          style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.15)' }}>
+          SAMPLE DATA · YOUR WORLD MODEL IS EMPTY
+        </div>
+      )}
 
       {/* Stats panel */}
       <GraphPanel

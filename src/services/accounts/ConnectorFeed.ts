@@ -41,7 +41,8 @@ export interface FeedState {
   lastRefreshAt: number | null
 }
 
-const FRESH_MS = 60_000   // snapshots are reused for 60s before a refetch is allowed
+const FRESH_MS = 5 * 60_000   // snapshots reused for 5 min — matches the auto-refresh interval.
+                                // Means navigating Apps → Home → Apps does NOT re-fetch.
 
 function todayISO(): string {
   return new Date().toISOString().slice(0, 10)   // YYYY-MM-DD, local-day is close enough
