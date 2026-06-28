@@ -1,14 +1,37 @@
 use std::process::Command;
 
 // Git identity switcher — one-click toggle between personal and work global git config.
-// Identities are hardcoded (owner's two git personas):
-//   personal → jaskiring / personal@example.com
-//   work     → work-user / work@example.com
+// Identities are loaded at runtime from ~/.piku/identity.json (gitignored, machine-local).
+// Falls back to neutral placeholders when the file is absent or unparseable.
 
-const PERSONAL_NAME:  &str = "jaskiring";
-const PERSONAL_EMAIL: &str = "personal@example.com";
-const WORK_NAME:      &str = "work-user";
-const WORK_EMAIL:     &str = "work@example.com";
+fn load_identity() -> (String, String, String, String) {
+    let path = dirs_or_home().join(".piku").join("identity.json");
+    let fallback = (
+        "personal-user".to_string(),
+        "personal@example.com".to_string(),
+        "work-user".to_string(),
+        "work@example.com".to_string(),
+    );
+    let Ok(raw) = std::fs::read_to_string(&path) else { return fallback };
+    let Ok(v)   = serde_json::from_str::<serde_json::Value>(&raw) else { return fallback };
+    let str_field = |key: &str| -> String {
+        v.get(key).and_then(|x| x.as_str()).unwrap_or("").to_string()
+    };
+    let pn = str_field("personalName");
+    let pe = str_field("personalEmail");
+    let wn = str_field("workName");
+    let we = str_field("workEmail");
+    if pn.is_empty() || pe.is_empty() || wn.is_empty() || we.is_empty() {
+        return fallback;
+    }
+    (pn, pe, wn, we)
+}
+
+fn dirs_or_home() -> std::path::PathBuf {
+    std::env::var("HOME")
+        .map(std::path::PathBuf::from)
+        .unwrap_or_else(|_| std::path::PathBuf::from("/tmp"))
+}
 
 fn git_config_get(key: &str) -> String {
     Command::new("git")
@@ -37,14 +60,15 @@ pub fn git_identity_get() -> Result<(String, String), String> {
 /// Returns the newly-applied (name, email).
 #[tauri::command]
 pub fn git_identity_set(which: String) -> Result<(String, String), String> {
+    let (personal_name, personal_email, work_name, work_email) = load_identity();
     let (name, email) = match which.as_str() {
-        "personal" => (PERSONAL_NAME, PERSONAL_EMAIL),
-        "work"     => (WORK_NAME, WORK_EMAIL),
+        "personal" => (personal_name, personal_email),
+        "work"     => (work_name, work_email),
         other      => return Err(format!("unknown identity \"{other}\" — use \"personal\" or \"work\"")),
     };
-    git_config_set("user.name", name)?;
-    git_config_set("user.email", email)?;
-    Ok((name.to_string(), email.to_string()))
+    git_config_set("user.name", &name)?;
+    git_config_set("user.email", &email)?;
+    Ok((name, email))
 }
 
 /// Run `git push` in the given directory. Returns combined stdout+stderr.

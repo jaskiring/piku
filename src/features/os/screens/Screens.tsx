@@ -500,7 +500,7 @@ export function DatasetsScreen() {
             <div className="flex-1 min-w-0">
               <div className="text-[13.5px] text-white/90">Tauri v2 + React/TS + Rust</div>
               <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">
-                ~/piku · branch glm-piku · not yet live-indexed
+                Piku source — Tauri + React + Rust, indexed locally
               </div>
             </div>
           </div>
@@ -589,8 +589,8 @@ export function AppsScreen() {
 
 /* ───────────────────────── Git Identity switcher ───────────────────────── */
 
-const PERSONAL_EMAIL_KEY = 'personal@example.com'
-const WORK_EMAIL_KEY     = 'work@example.com'
+const PERSONAL_EMAIL_KEY = import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com'
+const WORK_EMAIL_KEY     = import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com'
 
 function GitIdentityCard() {
   const [name, setName]   = useState<string>('')
@@ -649,7 +649,7 @@ function GitIdentityCard() {
             color: isPersonal ? '#a5f3fc' : 'rgba(165,243,252,0.5)',
           }}>
           Personal<br />
-          <span className="text-[8.5px] normal-case tracking-normal opacity-60">jaskiring</span>
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user'}</span>
         </button>
         <button
           disabled={busy}
@@ -662,7 +662,7 @@ function GitIdentityCard() {
             color: isWork ? '#f0abfc' : 'rgba(240,171,252,0.5)',
           }}>
           Work<br />
-          <span className="text-[8.5px] normal-case tracking-normal opacity-60">work-user</span>
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{import.meta.env.VITE_PIKU_WORK_GH ?? 'work-user'}</span>
         </button>
       </div>
 
@@ -927,8 +927,8 @@ export function FilesScreen() {
 
 /* ───────────────────────── Calendar ───────────────────────── */
 
-const CAL_WORK_EMAIL    = 'work@example.com'
-const CAL_PERSONAL_EMAIL = 'personal@example.com'
+const CAL_WORK_EMAIL     = import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com'
+const CAL_PERSONAL_EMAIL = import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com'
 
 type CalAccountTag = 'work' | 'personal' | 'other'
 interface TaggedCalendarEvent extends CalendarEvent {

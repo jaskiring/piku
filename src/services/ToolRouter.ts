@@ -408,7 +408,9 @@ const TOOLS: Record<string, ToolDef> = {
     run: async (args) => {
       const acc = String(args.account ?? 'work').toLowerCase()
       const personal = acc.startsWith('person')
-      const email = personal ? 'personal@example.com' : 'work@example.com'
+      const email = personal
+        ? (import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com')
+        : (import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com')
       try {
         await invokeTauri('open_in_piku_chrome', { url: 'https://mail.google.com/mail/u/?authuser=' + email })
         return 'Opened your ' + (personal ? 'personal' : 'work') + ' Gmail.'

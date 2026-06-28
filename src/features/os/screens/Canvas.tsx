@@ -13,8 +13,14 @@ type Persona = 'office' | 'personal'
 type PanelId = 'gmail' | 'github' | 'whatsapp' | 'linkedin'
 interface Geom { x: number; y: number; w: number; h: number; z: number }
 
-const EMAIL: Record<Persona, string> = { office: 'work@example.com', personal: 'personal@example.com' }
-const GH: Record<Persona, string>    = { office: 'work-user', personal: 'jaskiring' }
+const EMAIL: Record<Persona, string> = {
+  office:   import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com',
+  personal: import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com',
+}
+const GH: Record<Persona, string> = {
+  office:   import.meta.env.VITE_PIKU_WORK_GH     ?? 'work-user',
+  personal: import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user',
+}
 const GRID = 24
 const MIN_W = 300
 const MIN_H = 220

@@ -26,8 +26,14 @@ const MIN_W = 280
 const MIN_H = 200
 const LS_KEY = 'piku.playground.v1'
 
-const EMAIL: Record<Persona, string> = { office: 'work@example.com', personal: 'personal@example.com' }
-const GH: Record<Persona, string>    = { office: 'work-user', personal: 'jaskiring' }
+const EMAIL: Record<Persona, string> = {
+  office:   import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com',
+  personal: import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com',
+}
+const GH: Record<Persona, string> = {
+  office:   import.meta.env.VITE_PIKU_WORK_GH     ?? 'work-user',
+  personal: import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user',
+}
 
 const snap = (v: number) => Math.round(v / GRID) * GRID
 

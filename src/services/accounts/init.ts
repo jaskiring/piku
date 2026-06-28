@@ -5,8 +5,8 @@ import { accountService } from './AccountService'
 // backfills the token/username onto an account that was previously seeded empty, so connecting is
 // idempotent. The agent's github tools match by label 'personal' / 'office'.
 const SEEDS: { label: string; username: string; token?: string }[] = [
-  { label: 'Personal', username: 'jaskiring',      token: import.meta.env.VITE_GH_PERSONAL_TOKEN },
-  { label: 'Office',   username: 'work-user', token: import.meta.env.VITE_GH_OFFICE_TOKEN },
+  { label: 'Personal', username: import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user', token: import.meta.env.VITE_GH_PERSONAL_TOKEN },
+  { label: 'Office',   username: import.meta.env.VITE_PIKU_WORK_GH     ?? 'work-user',     token: import.meta.env.VITE_GH_OFFICE_TOKEN },
 ]
 
 export async function seedAccounts(): Promise<void> {
