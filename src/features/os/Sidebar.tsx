@@ -69,8 +69,8 @@ export function Sidebar({ view, onNavigate }: { view: NavKey; onNavigate: (k: Na
           <span className="font-hud text-[9.5px] tracking-[0.18em] text-emerald-300/80 uppercase">System Online</span>
         </div>
         <div className="font-hud text-[9px] text-white/35 mt-2 leading-relaxed">
-          <div>BRAIN · {ACTIVE_BRAIN.model}</div>
-          <div className="text-white/25">LOCAL · PRIVATE · ON-DEVICE</div>
+          <div>LOCAL · {ACTIVE_BRAIN.model}</div>
+          <div className="text-white/25">REASONING · OPENCODE</div>
         </div>
       </div>
     </aside>

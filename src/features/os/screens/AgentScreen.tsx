@@ -13,6 +13,7 @@ import { PIKU_PERSONA } from '../../../lib/persona'
 import { planReasoning, classifyIntent } from '../../../services/ReasoningPlanner'
 import type { ReasoningFlow } from '../../../services/ReasoningPlanner'
 import { opencodeProvider } from '../../../services/OpencodeProvider'
+import { isOpencodeBrain } from '../../chat/hooks/useChat'
 import { detectMode, assembleMode, handoffToExternal, MODES } from '../../../services/modes/Modes'
 import type { Mode } from '../../../services/modes/Modes'
 import { projectBrainService, modeToCategory, toSlug } from '../../../services/ProjectBrainService'
@@ -100,7 +101,7 @@ export function AgentScreen() {
   // thought into the chat). Falls back to local Ollama if opencode is unreachable.
   const runBrain = async (system: string, msg: string, history: { role: 'you' | 'piku'; text: string }[]) => {
     try {
-      if (await opencodeProvider.ensureServer()) {
+      if (isOpencodeBrain() && await opencodeProvider.ensureServer()) {
         setPhase('thinking')
         let captured = ''
         const reply = await opencodeProvider.chatStream(

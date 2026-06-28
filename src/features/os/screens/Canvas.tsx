@@ -1,6 +1,7 @@
 import { useEffect, useReducer, useRef, useState } from 'react'
 import type { MailSummary } from '../../../services/accounts'
 import { accountService, gmailConnector, gitHubConnector } from '../../../services/accounts'
+import { pikuSettings } from '../../../services/settings'
 
 // The Apps "chart paper": a freeform canvas of draggable + resizable panels, all INSIDE Piku.
 // Gmail + GitHub are native React panels scoped to the active persona (Office/Personal); WhatsApp +
@@ -13,13 +14,15 @@ type Persona = 'office' | 'personal'
 type PanelId = 'gmail' | 'github' | 'whatsapp' | 'linkedin'
 interface Geom { x: number; y: number; w: number; h: number; z: number }
 
+// Live from Settings → Profile: getters read pikuSettings on each access, so editing the email /
+// username in the UI updates the persona instantly. Defaults still come from VITE_PIKU_* (via settings).
 const EMAIL: Record<Persona, string> = {
-  office:   import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com',
-  personal: import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com',
+  get office()   { return pikuSettings.get().workEmail },
+  get personal() { return pikuSettings.get().personalEmail },
 }
 const GH: Record<Persona, string> = {
-  office:   import.meta.env.VITE_PIKU_WORK_GH     ?? 'work-user',
-  personal: import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user',
+  get office()   { return pikuSettings.get().workGitHub },
+  get personal() { return pikuSettings.get().personalGitHub },
 }
 const GRID = 24
 const MIN_W = 300

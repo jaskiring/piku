@@ -1,5 +1,6 @@
 import { logger } from '../lib/logger'
 import { stripMetaPreamble } from '../lib/stripUtils'
+import { pikuSettings } from './settings'
 export { stripMetaPreamble }   // re-export so callers that used to import from here still work
 
 // ---------------------------------------------------------------------------
@@ -19,7 +20,9 @@ export { stripMetaPreamble }   // re-export so callers that used to import from 
 
 const OPENCODE_PORT  = 47817                               // Piku-private port (avoids the desktop app's :4096)
 const OPENCODE_BASE  = `http://127.0.0.1:${OPENCODE_PORT}`
-export const OPENCODE_MODEL = { providerID: 'opencode', modelID: 'deepseek-v4-flash-free' }
+// modelID is a live getter so the user can change the opencode model from Settings → Models.
+// JSON.stringify invokes getters, so the value still serializes correctly in the request body.
+export const OPENCODE_MODEL = { providerID: 'opencode', get modelID() { return pikuSettings.get().opencodeModel } }
 
 interface SessionResp { id: string }
 interface MessagePart { type: string; text?: string }

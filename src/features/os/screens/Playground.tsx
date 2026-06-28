@@ -1,6 +1,7 @@
 import { useEffect, useRef, useState } from 'react'
 import type { MailSummary } from '../../../services/accounts'
 import { accountService, gmailConnector, gitHubConnector, useConnectorFeed, useInbox, useUpcomingEvents } from '../../../services/accounts'
+import { pikuSettings } from '../../../services/settings'
 import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
 import { projectService } from '../../projects/components/ProjectDashboard'
 import type { Project } from '../../projects/types'
@@ -26,13 +27,15 @@ const MIN_W = 280
 const MIN_H = 200
 const LS_KEY = 'piku.playground.v1'
 
+// Live from Settings → Profile: getters read pikuSettings on each access, so editing the email /
+// username in the UI updates the persona instantly. Defaults still come from VITE_PIKU_* (via settings).
 const EMAIL: Record<Persona, string> = {
-  office:   import.meta.env.VITE_PIKU_WORK_EMAIL     ?? 'work@example.com',
-  personal: import.meta.env.VITE_PIKU_PERSONAL_EMAIL ?? 'personal@example.com',
+  get office()   { return pikuSettings.get().workEmail },
+  get personal() { return pikuSettings.get().personalEmail },
 }
 const GH: Record<Persona, string> = {
-  office:   import.meta.env.VITE_PIKU_WORK_GH     ?? 'work-user',
-  personal: import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user',
+  get office()   { return pikuSettings.get().workGitHub },
+  get personal() { return pikuSettings.get().personalGitHub },
 }
 
 const snap = (v: number) => Math.round(v / GRID) * GRID

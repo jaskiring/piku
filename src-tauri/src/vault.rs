@@ -15,6 +15,16 @@ fn valid_category(c: &str) -> bool {
     matches!(c, "projects" | "brainstorms" | "executes")
 }
 
+// Reject path-traversal: a slug/filename must be one simple segment — no separators, no "..".
+// Returns the trimmed segment so callers use the sanitized value.
+fn safe_segment(s: &str) -> Result<String, String> {
+    let t = s.trim();
+    if t.is_empty() || t == "." || t == ".." || t.contains('/') || t.contains('\\') || t.contains("..") {
+        return Err(format!("refused unsafe path segment: {s}"));
+    }
+    Ok(t.to_string())
+}
+
 /// Create the vault base + the three category folders if missing; return the base path.
 #[tauri::command]
 pub fn vault_ensure() -> Result<String, String> {
@@ -31,6 +41,8 @@ pub fn vault_write(category: String, slug: String, filename: String, content: St
     if !valid_category(&category) {
         return Err(format!("invalid category: {category}"));
     }
+    let slug = safe_segment(&slug)?;
+    let filename = safe_segment(&filename)?;
     let dir = vault_base()?.join(&category).join(&slug);
     fs::create_dir_all(&dir).map_err(|e| e.to_string())?;
     fs::write(dir.join(&filename), content).map_err(|e| e.to_string())
@@ -42,6 +54,8 @@ pub fn vault_read(category: String, slug: String, filename: String) -> Result<St
     if !valid_category(&category) {
         return Err(format!("invalid category: {category}"));
     }
+    let slug = safe_segment(&slug)?;
+    let filename = safe_segment(&filename)?;
     let path = vault_base()?.join(&category).join(&slug).join(&filename);
     fs::read_to_string(&path).map_err(|e| e.to_string())
 }
@@ -52,6 +66,7 @@ pub fn vault_delete(category: String, slug: String) -> Result<(), String> {
     if !valid_category(&category) {
         return Err(format!("invalid category: {category}"));
     }
+    let slug = safe_segment(&slug)?;
     let dir = vault_base()?.join(&category).join(&slug);
     if dir.exists() {
         fs::remove_dir_all(&dir).map_err(|e| e.to_string())?;

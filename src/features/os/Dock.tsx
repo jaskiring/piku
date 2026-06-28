@@ -6,7 +6,7 @@ const DOCK: { key: NavKey; label: string; glyph: string }[] = [
   { key: 'projects',  label: 'Projects',  glyph: '▤' },
   { key: 'knowledge', label: 'Knowledge', glyph: '✦' },
   { key: 'apps',      label: 'Apps',      glyph: '⊞' },
-  { key: 'playground', label: 'Grnd',     glyph: '⬡' },
+  { key: 'playground', label: 'Play',     glyph: '⬡' },
   { key: 'settings',  label: 'Settings',  glyph: '⚙' },
 ]
 

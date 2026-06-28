@@ -1,10 +1,12 @@
 import { logger } from '../lib/logger'
 import { stripThinkingTokens } from '../lib/stripUtils'
+import { pikuSettings } from './settings'
 
 const OLLAMA_BASE    = 'http://localhost:11434'
-const CHAT_MODEL     = 'qwen3:4b'   // 4B fits a 16GB M4 comfortably + keeps thinking mode.
-                                    // Model names live ONLY here (P1) — swap freely.
-const EMBED_MODEL    = 'nomic-embed-text'
+// The chat model is user-configurable from Settings → Models (persisted in pikuSettings). Read it
+// at call time via chatModel() so changing it in the UI takes effect on the next request — no reload.
+const chatModel = () => pikuSettings.get().chatModel
+const EMBED_MODEL    = 'nomic-embed-text'   // pinned: changing it would invalidate stored vectors
 const CHAT_TIMEOUT       = 240_000  // 4 min — qwen3 reasoning can be lengthy on a busy machine
 const EXTRACTION_TIMEOUT = 300_000  // 5 min — for document/conversation extraction (background)
 const EMBED_TIMEOUT      =  15_000
@@ -21,9 +23,9 @@ const EXTRACT_NUM_PREDICT = 1024    // background extraction: short JSON only �
 const CHAT_KEEP_ALIVE  = '30m'
 const EMBED_KEEP_ALIVE  = '10m'
 
-// Shown in the overlay status strip. The ProviderRegistry (Sprint 2.5-P) will make
-// this dynamic — local Ollama vs. a Claude-CLI escalation.
-export const ACTIVE_BRAIN = { model: CHAT_MODEL, where: 'local' as const }
+// Shown in the overlay status strip. `model` is a live getter so it tracks the user's choice in
+// Settings → Models (the local Ollama chat model); `where` stays 'local'.
+export const ACTIVE_BRAIN = { get model() { return chatModel() }, where: 'local' as const }
 
 export interface OllamaToolCall {
   function: { name: string; arguments: Record<string, unknown> }
@@ -92,10 +94,10 @@ class OllamaService {
         ? [{ role: 'system', content: systemPrefix }, { role: 'user', content: 'hi' }]
         : [{ role: 'user', content: 'hi' }]
       await this.post('/api/chat', {
-        model: CHAT_MODEL, stream: false, think: false, keep_alive: CHAT_KEEP_ALIVE,
+        model: chatModel(), stream: false, think: false, keep_alive: CHAT_KEEP_ALIVE,
         messages, options: { num_ctx: NUM_CTX, num_predict: 1 },
       }, AbortSignal.timeout(90_000))
-      logger.ollama('warmup complete', { model: CHAT_MODEL, ms: Date.now() - t0 })
+      logger.ollama('warmup complete', { model: chatModel(), ms: Date.now() - t0 })
     } catch (err) {
       logger.ollama('warmup skipped', { error: String(err) })
     }
@@ -124,17 +126,17 @@ class OllamaService {
     timeoutMs   = CHAT_TIMEOUT,
     think       = false,   // extraction/summary callers don't need visible reasoning → far faster
   ): Promise<string> {
-    logger.ollama('chat request', { model: CHAT_MODEL, turns: messages.length, temperature, timeoutMs })
+    logger.ollama('chat request', { model: chatModel(), turns: messages.length, temperature, timeoutMs })
 
     const controller = new AbortController()
     const timer = setTimeout(() => {
       controller.abort()
-      logger.error('chat timeout', { model: CHAT_MODEL, ms: timeoutMs })
+      logger.error('chat timeout', { model: chatModel(), ms: timeoutMs })
     }, timeoutMs)
 
     try {
       const res = await this.post('/api/chat', {
-        model:   CHAT_MODEL,
+        model:   chatModel(),
         stream:  false,
         think,
         keep_alive: CHAT_KEEP_ALIVE,
@@ -173,12 +175,12 @@ class OllamaService {
     const controller = new AbortController()
     const timer = setTimeout(() => {
       controller.abort()
-      logger.error('chat stream timeout', { model: CHAT_MODEL, ms: timeoutMs })
+      logger.error('chat stream timeout', { model: chatModel(), ms: timeoutMs })
     }, timeoutMs)
 
     try {
       const res = await this.post('/api/chat', {
-        model:   CHAT_MODEL,
+        model:   chatModel(),
         stream:  true,
         think,
         keep_alive: CHAT_KEEP_ALIVE,
@@ -278,7 +280,7 @@ class OllamaService {
       // think:true → qwen3 returns reasoning in `thinking` (for the agent's thinking panel),
       // a clean answer in `content`, and still emits `tool_calls`. Clean separation.
       const res = await this.post('/api/chat', {
-        model:   CHAT_MODEL,
+        model:   chatModel(),
         stream:  false,
         think:   true,
         keep_alive: CHAT_KEEP_ALIVE,
@@ -315,7 +317,7 @@ class OllamaService {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await this.post('/api/chat', {
-        model:   CHAT_MODEL,
+        model:   chatModel(),
         stream:  true,
         think,
         keep_alive: CHAT_KEEP_ALIVE,
@@ -359,7 +361,7 @@ class OllamaService {
     const timer = setTimeout(() => controller.abort(), timeoutMs)
     try {
       const res = await this.post('/api/chat', {
-        model: CHAT_MODEL, stream: false, think: false, keep_alive: CHAT_KEEP_ALIVE,
+        model: chatModel(), stream: false, think: false, keep_alive: CHAT_KEEP_ALIVE,
         format: 'json', messages,
         options: { temperature: 0.3, num_ctx: NUM_CTX, num_predict: 700 },
       }, controller.signal)

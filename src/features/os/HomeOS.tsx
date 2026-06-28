@@ -6,6 +6,7 @@ import { projectService } from '../projects/components/ProjectDashboard'
 import { graphService } from '../graph'
 import { ollamaService, ACTIVE_BRAIN } from '../../services/OllamaService'
 import { useConnectorFeed } from '../../services/accounts/ConnectorFeed'
+import { useSettings } from '../../services/settings'
 import { HudPanel, HudChip, chamfer } from './Hud'
 
 // HomeOS — the functional home as a premium cyberpunk HUD. Real content (ask bar, projects,
@@ -36,6 +37,7 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
   const [focused, setFocused] = useState(false)
   const inputRef = useRef<HTMLInputElement>(null)
   const feed = useConnectorFeed()   // shared connector cache — Gmail + GitHub + Calendar
+  const settings = useSettings()    // live operator identity (editable in Settings → Profile)
 
   useEffect(() => { const id = setInterval(() => setNow(new Date()), 30_000); return () => clearInterval(id) }, [])
 
@@ -77,9 +79,9 @@ export function HomeOS({ inputText, onInputChange, isSending, onAsk, onNavigate,
         <div className="flex items-center gap-5 mb-7">
           <div className="shrink-0"><Orb presence={presence} size={64} /></div>
           <div>
-            <div className="font-hud text-[10px] tracking-[0.3em] text-cyan-300/45 uppercase mb-1.5">// Operator · Jaskirat</div>
+            <div className="font-hud text-[10px] tracking-[0.3em] text-cyan-300/45 uppercase mb-1.5">// Operator · {settings.operatorName}</div>
             <h1 className="text-[32px] leading-none font-light tracking-tight text-white/90">
-              {greeting()}, <span className="font-normal text-cyan-50 text-glow-cyan">Jaskirat</span>
+              {greeting()}, <span className="font-normal text-cyan-50 text-glow-cyan">{settings.operatorName}</span>
             </h1>
           </div>
         </div>

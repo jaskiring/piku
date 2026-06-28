@@ -6,15 +6,17 @@ import type { NavKey } from '../Sidebar'
 import { ScreenShell, BuildStatus, Hint } from './ScreenShell'
 import { graphService } from '../../graph'
 import { projectService } from '../../projects/components/ProjectDashboard'
+import type { Project } from '../../projects/types'
 import { ollamaService, ACTIVE_BRAIN } from '../../../services/OllamaService'
 import { opencodeProvider, OPENCODE_MODEL } from '../../../services/OpencodeProvider'
+import { pikuSettings, useSettings } from '../../../services/settings'
 import { AgentScreen } from './AgentScreen'
 import { CanvasScreen } from './Canvas'
 import { PlaygroundScreen } from './Playground'
 import { AutomationsScreen } from './Automations'
 
-const AddBtn = ({ label }: { label: string }) => (
-  <button className="text-[12px] text-cyan-200 bg-cyan-500/12 hover:bg-cyan-500/20 border border-cyan-400/20 rounded-xl px-3 py-1.5 transition-colors">{label}</button>
+const AddBtn = ({ label, onClick }: { label: string; onClick?: () => void }) => (
+  <button onClick={onClick} className="text-[12px] text-cyan-200 bg-cyan-500/12 hover:bg-cyan-500/20 border border-cyan-400/20 rounded-xl px-3 py-1.5 transition-colors">{label}</button>
 )
 const Pill = ({ children, tone = 'idle' }: { children: ReactNode; tone?: 'run' | 'idle' }) => (
   <span className={`text-[9px] px-1.5 py-0.5 rounded ${tone === 'run' ? 'text-cyan-300/80 bg-cyan-500/10' : 'text-white/40 bg-white/5'}`}>{children}</span>
@@ -73,6 +75,7 @@ export function ModelsScreen() {
   const [localModels, setLocalModels] = useState<string[]>(Object.keys(KNOWN_MODELS))
   const [ocOnline, setOcOnline] = useState<boolean | null>(null)
   const [ollamaUp, setOllamaUp] = useState<boolean | null>(null)
+  useSettings()   // re-render when the active chat model changes (ACTIVE_BRAIN.model is settings-backed)
   useEffect(() => {
     void ollamaService.listModels().then(names => { if (names.length) setLocalModels(names) }).catch(() => {})
     void opencodeProvider.isReachable().then(setOcOnline).catch(() => setOcOnline(false))
@@ -81,7 +84,7 @@ export function ModelsScreen() {
   const defaultModel = ACTIVE_BRAIN.model
 
   return (
-    <ScreenShell title="Models" subtitle="Piku's brains — fast & private on-device, capable & free via opencode.">
+    <ScreenShell title="Models" subtitle="Piku's brains — tap a local model to make it the active chat model; opencode handles deep reasoning.">
       <div className="grid grid-cols-12 gap-4">
 
         {/* ── Local brain ── */}
@@ -98,7 +101,8 @@ export function ModelsScreen() {
                     ? 'checking'
                     : 'idle'
               const isDim = !(isActive && ollamaUp === true)
-              return (
+              const isEmbed = /embed/i.test(name)   // embeddings model isn't a chat model — not selectable
+              return isEmbed ? (
                 <div key={name} className="flex items-center gap-3 px-3 py-2.5" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
                   <Glyph>{m.glyph}</Glyph>
                   <div className="flex-1 min-w-0">
@@ -107,6 +111,18 @@ export function ModelsScreen() {
                   </div>
                   <HudChip dim={isDim}>{badgeText}</HudChip>
                 </div>
+              ) : (
+                <button key={name} onClick={() => pikuSettings.set({ chatModel: name })}
+                  title={isActive ? 'Active chat model' : `Use ${name} as Piku's chat model`}
+                  className="flex items-center gap-3 px-3 py-2.5 w-full text-left transition-colors hover:bg-cyan-500/[0.06]"
+                  style={{ ...chamfer(8), background: isActive ? 'rgba(34,211,238,0.06)' : 'rgba(255,255,255,0.025)', boxShadow: isActive ? 'inset 0 0 0 1px rgba(34,211,238,0.25)' : undefined }}>
+                  <Glyph>{m.glyph}</Glyph>
+                  <div className="flex-1 min-w-0">
+                    <div className="text-[13.5px] text-white/90 truncate">{name}</div>
+                    <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{m.kind}</div>
+                  </div>
+                  <HudChip dim={isDim}>{isActive ? badgeText : 'use'}</HudChip>
+                </button>
               )
             })}
           </div>
@@ -195,46 +211,63 @@ const MOCK_PROJECTS = [
   { name: 'Research Copilot',      state: 'Planning',    docs: 3 },
 ]
 export function ProjectsScreen({ onNavigateToGalaxy, onNavigate }: { onNavigateToGalaxy?: (name: string) => void; onNavigate?: (v: string) => void }) {
-  const [projects, setProjects] = useState<{ name: string; state: string; docs: number }[]>(MOCK_PROJECTS)
-  const [live, setLive] = useState(false)
+  const [projects, setProjects] = useState<Project[]>([])
+  const [loading, setLoading] = useState(true)
+  const [selectedId, setSelectedId] = useState<string | null>(null)
+  const reload = () => projectService.getAllProjects().then(setProjects).catch(() => {})
   useEffect(() => {
     let cancelled = false
     void (async () => {
-      try {
-        const all = await projectService.getAllProjects()
-        if (!cancelled && all.length) {
-          setProjects(all.map(p => ({ name: p.name, state: p.currentState || 'Active', docs: 0 })))
-          setLive(true)
-        }
-      } catch { /* keep mock */ }
+      try { const all = await projectService.getAllProjects(); if (!cancelled) setProjects(all) }
+      catch { /* leave empty → show samples */ }
+      if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
   }, [])
-  const openGraph = (name: string) => {
-    onNavigateToGalaxy?.(name)
-    onNavigate?.('knowledge')
+  const openGraph = (name: string) => { onNavigateToGalaxy?.(name); onNavigate?.('knowledge') }
+  const createNew = async () => {
+    const p = await projectService.createProject('New project', '', 'Planning').catch(() => null)
+    if (p) { await reload(); setSelectedId(p.id) }
   }
+  const selected = projects.find(p => p.id === selectedId) ?? null
+  if (selected) return (
+    <ProjectDetail project={selected} onBack={() => setSelectedId(null)} onChanged={reload}
+      onOpenGraph={() => openGraph(selected.name)} onDeleted={() => { setSelectedId(null); void reload() }} />
+  )
   return (
-    <ScreenShell title="Projects" subtitle={live ? 'Live from your local project store.' : 'Sample projects — your real ones load from IndexedDB.'} action={<AddBtn label="+ New project" />}>
-      <HudPanel label="Projects" code="01" action={<HudChip dim>{projects.length} tracked</HudChip>}>
-        {live && projects.length === 0 ? (
-          <div className="font-hud text-[11px] uppercase tracking-[0.14em] text-cyan-300/45 py-6 text-center">
-            No projects yet — Piku creates them as it learns about your work.
+    <ScreenShell title="Projects" subtitle={projects.length ? 'Tracked locally — tap a project to view & edit its context.' : 'Sample projects — your real ones load from IndexedDB as Piku learns.'} action={<AddBtn label="+ New project" onClick={() => void createNew()} />}>
+      <HudPanel label="Projects" code="01" action={<HudChip dim>{loading ? 'loading' : `${projects.length} tracked`}</HudChip>}>
+        {loading ? (
+          <div className="font-hud text-[11px] uppercase tracking-[0.14em] text-white/30 py-6 text-center">Loading projects…</div>
+        ) : projects.length === 0 ? (
+          <div className="flex flex-col gap-2">
+            {MOCK_PROJECTS.map(p => (
+              <div key={p.name} className="flex items-center gap-3 px-3 py-2.5 opacity-70" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
+                <Glyph>▤</Glyph>
+                <div className="flex-1 min-w-0">
+                  <div className="text-[13.5px] text-white/90 truncate">{p.name}</div>
+                  <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">sample · {p.docs} docs</div>
+                </div>
+                <HudChip dim>{p.state}</HudChip>
+              </div>
+            ))}
+            <div className="font-hud text-[9.5px] uppercase tracking-[0.14em] text-cyan-300/40 pt-1 text-center">Samples — your real projects appear here as Piku learns about your work.</div>
           </div>
         ) : (
           <div className="flex flex-col gap-2">
             {projects.map(p => (
-              <div key={p.name} className="flex items-center gap-3 px-3 py-2.5" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
+              <button key={p.id} onClick={() => setSelectedId(p.id)}
+                className="flex items-center gap-3 px-3 py-2.5 w-full text-left hover:bg-cyan-500/[0.06] transition-colors" style={{ ...chamfer(8), background: 'rgba(255,255,255,0.025)' }}>
                 <Glyph>▤</Glyph>
                 <div className="flex-1 min-w-0">
                   <div className="text-[13.5px] text-white/90 truncate">{p.name}</div>
-                  <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5">{p.docs} docs · context tracked</div>
+                  <div className="font-hud text-[9.5px] uppercase tracking-wider text-white/35 mt-0.5 truncate">{(p.vision || 'context tracked').slice(0, 70)}</div>
                 </div>
-                <HudChip dim>{p.state}</HudChip>
-                <button onClick={() => openGraph(p.name)}
-                  className="font-hud text-[9.5px] uppercase tracking-[0.15em] text-cyan-200 hover:text-cyan-100 px-2.5 py-1.5 transition-colors"
-                  style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.25)' }}>✦ graph</button>
-              </div>
+                <HudChip dim>{p.currentState || 'Active'}</HudChip>
+                <span onClick={(e) => { e.stopPropagation(); openGraph(p.name) }}
+                  className="font-hud text-[9.5px] uppercase tracking-[0.15em] text-cyan-200 hover:text-cyan-100 px-2.5 py-1.5 transition-colors cursor-pointer"
+                  style={{ ...chamfer(6), boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.25)' }}>✦ graph</span>
+              </button>
             ))}
           </div>
         )}
@@ -242,9 +275,82 @@ export function ProjectsScreen({ onNavigateToGalaxy, onNavigate }: { onNavigateT
       <BuildStatus items={[
         { label: 'ProjectService / ProjectStore', state: 'built' },
         { label: 'Extraction + retrieval + context versions', state: 'built' },
-        { label: 'Project detail / editor UI', state: 'planned' },
+        { label: 'Project detail / editor UI', state: 'built' },
         { label: 'pendingProjectUpdates review', state: 'planned' },
       ]} />
+    </ScreenShell>
+  )
+}
+
+// Project detail / editor — view tracked context, edit name/vision/state (autosaves), delete.
+function ProjectDetail({ project, onBack, onChanged, onOpenGraph, onDeleted }: {
+  project: Project; onBack: () => void; onChanged: () => void; onOpenGraph: () => void; onDeleted: () => void
+}) {
+  const [name, setName] = useState(project.name)
+  const [vision, setVision] = useState(project.vision)
+  const [state, setState] = useState(project.currentState)
+  useEffect(() => { setName(project.name); setVision(project.vision); setState(project.currentState) }, [project.id, project.name, project.vision, project.currentState])
+  const commit = (patch: Partial<Project>) => { void projectService.updateProject(project.id, patch).then(onChanged).catch(() => {}) }
+  const Section = ({ label, items }: { label: string; items: string[] }) =>
+    items.length ? (
+      <div className="mb-3">
+        <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-cyan-300/55 mb-1.5">{label}</div>
+        <ul className="flex flex-col gap-1">
+          {items.map((it, i) => <li key={i} className="text-[12.5px] text-white/70 flex gap-2"><span className="text-cyan-400/50">·</span><span className="flex-1">{it}</span></li>)}
+        </ul>
+      </div>
+    ) : null
+  const empty = !project.inProgressWork.length && !project.nextSteps.length && !project.completedWork.length && !project.blockers.length && !project.decisions.length
+  return (
+    <ScreenShell title="Project" subtitle="View & edit this project's context — changes save automatically."
+      action={<button onClick={onBack} className="font-hud text-[10px] uppercase tracking-[0.15em] text-white/45 hover:text-cyan-200 transition-colors">← All projects</button>}>
+      <HudPanel label="Details" code="01" action={<button onClick={onOpenGraph} className="font-hud text-[9.5px] uppercase tracking-[0.15em] text-cyan-200 hover:text-cyan-100">✦ graph</button>}>
+        <div className="flex flex-col gap-3">
+          <label className="flex flex-col gap-1">
+            <span className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/40">Name</span>
+            <input value={name} onChange={e => setName(e.target.value)} onBlur={() => { const v = name.trim(); if (v && v !== project.name) commit({ name: v }) }}
+              className="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/85 outline-none focus:border-cyan-400/35" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/40">Vision</span>
+            <textarea value={vision} onChange={e => setVision(e.target.value)} onBlur={() => { if (vision !== project.vision) commit({ vision }) }} rows={3}
+              className="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/85 outline-none focus:border-cyan-400/35 resize-none" />
+          </label>
+          <label className="flex flex-col gap-1">
+            <span className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/40">Current state</span>
+            <input value={state} onChange={e => setState(e.target.value)} onBlur={() => { if (state !== project.currentState) commit({ currentState: state }) }}
+              className="bg-white/5 border border-white/10 rounded px-3 py-2 text-sm text-white/85 outline-none focus:border-cyan-400/35" />
+          </label>
+        </div>
+      </HudPanel>
+
+      <HudPanel label="Tracked context" code="02" className="mt-4">
+        <Section label="In progress" items={project.inProgressWork} />
+        <Section label="Next steps" items={project.nextSteps} />
+        <Section label="Completed" items={project.completedWork} />
+        <Section label="Blockers" items={project.blockers} />
+        {project.decisions.length > 0 && (
+          <div>
+            <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-fuchsia-200/55 mb-1.5">Decisions</div>
+            <div className="flex flex-col gap-2">
+              {project.decisions.map(d => (
+                <div key={d.id} className="px-3 py-2" style={{ ...chamfer(6), background: 'rgba(217,70,239,0.05)', boxShadow: 'inset 0 0 0 1px rgba(217,70,239,0.15)' }}>
+                  <div className="text-[12.5px] text-white/85">{d.title}</div>
+                  {d.reasoning && <div className="text-[11.5px] text-white/50 mt-0.5">{d.reasoning}</div>}
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+        {empty && <Hint>No tracked context yet — Piku fills this in as you talk about the project.</Hint>}
+      </HudPanel>
+
+      <div className="mt-4 flex justify-end">
+        <button onClick={() => { if (window.confirm(`Delete project "${project.name}"? This removes its tracked context.`)) void projectService.deleteProject(project.id).then(onDeleted) }}
+          className="font-hud text-[10px] uppercase tracking-[0.15em] text-white/40 hover:text-red-400/80 border border-white/10 hover:border-red-400/30 px-3 py-1.5 transition-colors" style={{ ...chamfer(6) }}>
+          Delete project
+        </button>
+      </div>
     </ScreenShell>
   )
 }
@@ -597,6 +703,7 @@ function GitIdentityCard() {
   const [email, setEmail] = useState<string>('')
   const [busy, setBusy]   = useState(false)
   const [err, setErr]     = useState('')
+  const s = useSettings()   // live identity (Settings → Profile); env consts kept as fallback
 
   const refresh = async () => {
     try {
@@ -618,8 +725,8 @@ function GitIdentityCard() {
     finally { setBusy(false) }
   }
 
-  const isPersonal = email === PERSONAL_EMAIL_KEY
-  const isWork     = email === WORK_EMAIL_KEY
+  const isPersonal = email === (s.personalEmail || PERSONAL_EMAIL_KEY)
+  const isWork     = email === (s.workEmail || WORK_EMAIL_KEY)
   const tone       = isPersonal ? 'cyan' : isWork ? 'violet' : undefined
 
   return (
@@ -649,7 +756,7 @@ function GitIdentityCard() {
             color: isPersonal ? '#a5f3fc' : 'rgba(165,243,252,0.5)',
           }}>
           Personal<br />
-          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{import.meta.env.VITE_PIKU_PERSONAL_GH ?? 'personal-user'}</span>
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{s.personalGitHub}</span>
         </button>
         <button
           disabled={busy}
@@ -662,7 +769,7 @@ function GitIdentityCard() {
             color: isWork ? '#f0abfc' : 'rgba(240,171,252,0.5)',
           }}>
           Work<br />
-          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{import.meta.env.VITE_PIKU_WORK_GH ?? 'work-user'}</span>
+          <span className="text-[8.5px] normal-case tracking-normal opacity-60">{s.workGitHub}</span>
         </button>
       </div>
 
@@ -724,6 +831,7 @@ function WorkToolCard({ glyph, name, kind, blurb, url, className }: WorkToolCard
 }
 
 export function WorkScreen() {
+  const settings = useSettings()
   return (
     <ScreenShell title="Work" subtitle="Your coding & productivity world — commits, tickets, docs, terminal, all in one place.">
       <div className="grid grid-cols-12 gap-4">
@@ -741,7 +849,7 @@ export function WorkScreen() {
           name="Jira"
           kind="Atlassian · project tracking"
           blurb="Tickets, sprints, and backlog — open your logged-in Jira workspace inside the Piku Chrome profile."
-          url={WORK_TOOL_URLS.jira}
+          url={settings.jiraUrl || WORK_TOOL_URLS.jira}
         />
         <WorkToolCard
           className="col-span-12 md:col-span-4"
@@ -749,7 +857,7 @@ export function WorkScreen() {
           name="Confluence"
           kind="Atlassian · docs & specs"
           blurb="Team wiki and project specs — open your logged-in Confluence space inside the Piku Chrome profile."
-          url={WORK_TOOL_URLS.confluence}
+          url={settings.confluenceUrl || WORK_TOOL_URLS.confluence}
         />
         <WorkToolCard
           className="col-span-12 md:col-span-4"
@@ -757,7 +865,7 @@ export function WorkScreen() {
           name="Notion"
           kind="Notion · notes & brainstorm"
           blurb="Notes, databases, and brainstorming — open your logged-in Notion workspace inside the Piku Chrome profile."
-          url={WORK_TOOL_URLS.notion}
+          url={settings.notionUrl || WORK_TOOL_URLS.notion}
         />
       </div>
       <BuildStatus items={[
@@ -879,46 +987,94 @@ function CodingWidget() {
 
 /* ───────────────────────── Files ───────────────────────── */
 export function FilesScreen() {
+  const [cwd, setCwd] = useState('')               // home-relative path; '' = home root
   const [entries, setEntries] = useState<string[]>([])
   const [loading, setLoading] = useState(true)
+  const [error, setError] = useState('')
   useEffect(() => {
     let cancelled = false
+    setLoading(true); setError('')
     void (async () => {
       try {
         const { invoke } = await import('@tauri-apps/api/core')
-        const result = await invoke<string[]>('list_dir', { path: '' })
+        const result = await invoke<string[]>('list_dir', { path: cwd })
         if (!cancelled) setEntries(result)
-      } catch { /* not in Tauri or command unavailable */ }
+      } catch (e) {
+        if (!cancelled) { setEntries([]); setError(String(e instanceof Error ? e.message : e)) }
+      }
       if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
-  }, [])
+  }, [cwd])
+
+  const segments = cwd ? cwd.split('/').filter(Boolean) : []
+  const openFolder = (name: string) => {
+    const clean = name.replace(/\/$/, '')
+    setCwd(cwd ? `${cwd}/${clean}` : clean)
+  }
+  const goTo = (i: number) => setCwd(segments.slice(0, i + 1).join('/'))
+  const folders = entries.filter(e => e.endsWith('/'))
+  const files   = entries.filter(e => !e.endsWith('/'))
+
   return (
-    <ScreenShell title="Files" subtitle="Live from your home directory via list_dir.">
+    <ScreenShell title="Files" subtitle="Browse your home directory — folders open in place (read-only, sandboxed to home).">
+      {/* breadcrumb */}
+      <div className="flex items-center gap-1.5 mb-4 font-hud text-[11px] flex-wrap">
+        <button onClick={() => setCwd('')}
+          className={`uppercase tracking-wider transition-colors ${segments.length === 0 ? 'text-cyan-200' : 'text-white/45 hover:text-cyan-200'}`}>~ home</button>
+        {segments.map((seg, i) => (
+          <span key={i} className="flex items-center gap-1.5">
+            <span className="text-white/20">/</span>
+            <button onClick={() => goTo(i)}
+              className={`transition-colors ${i === segments.length - 1 ? 'text-cyan-200' : 'text-white/45 hover:text-cyan-200'}`}>{seg}</button>
+          </span>
+        ))}
+        {segments.length > 0 && (
+          <button onClick={() => setCwd(segments.slice(0, -1).join('/'))}
+            className="ml-2 text-white/40 hover:text-cyan-200 uppercase tracking-wider" title="Up one level">↑ up</button>
+        )}
+      </div>
+
       <Card className="col-span-12" bodyClass="!p-0">
         {loading ? (
           <div className="px-4 py-6 text-center">
-            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">Scanning home directory…</span>
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">Scanning {cwd || 'home'}…</span>
+          </div>
+        ) : error ? (
+          <div className="px-4 py-6 text-center">
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-amber-300/60">{error}</span>
           </div>
         ) : entries.length === 0 ? (
           <div className="px-4 py-6 text-center">
-            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">No entries found.</span>
+            <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">This folder is empty.</span>
           </div>
         ) : (
           <div className="divide-y divide-white/5">
-            {entries.map(f => (
+            {folders.map(f => (
+              <button key={f} onClick={() => openFolder(f)}
+                className="w-full flex items-center gap-3 px-4 py-2.5 text-left hover:bg-cyan-500/[0.06] transition-colors">
+                <span className="text-cyan-300/70 w-5 text-center">▸</span>
+                <span className="text-sm text-white/85 flex-1 font-mono truncate">{f.replace(/\/$/, '')}</span>
+                <span className="font-hud text-[9px] uppercase tracking-wider text-white/25 shrink-0">folder</span>
+              </button>
+            ))}
+            {files.map(f => (
               <div key={f} className="flex items-center gap-3 px-4 py-2.5">
-                <span className="text-white/40 w-5 text-center">{f.endsWith('/') ? '▸' : '·'}</span>
-                <span className="text-sm text-white/80 flex-1 font-mono">{f}</span>
+                <span className="text-white/35 w-5 text-center">·</span>
+                <span className="text-sm text-white/70 flex-1 font-mono truncate">{f}</span>
               </div>
             ))}
           </div>
         )}
+        {!loading && !error && entries.length >= 100 && (
+          <div className="px-4 py-2 border-t border-white/5 text-center font-hud text-[9px] uppercase tracking-[0.15em] text-white/25">showing first 100 entries</div>
+        )}
       </Card>
       <BuildStatus items={[
         { label: 'list_dir (home) — built', state: 'built' },
+        { label: 'Folder navigation + breadcrumb', state: 'built' },
         { label: 'Runtime vault (piku-vault/)', state: 'planned' },
-        { label: 'File browser + preview', state: 'planned' },
+        { label: 'File preview', state: 'planned' },
         { label: 'Vault capture (2.5-V)', state: 'planned' },
       ]} />
     </ScreenShell>
@@ -939,12 +1095,15 @@ type CalFilter = 'all' | 'work' | 'personal'
 
 function tagForEmail(email: string | undefined): CalAccountTag {
   const e = (email ?? '').toLowerCase()
-  if (e === CAL_WORK_EMAIL) return 'work'
-  if (e === CAL_PERSONAL_EMAIL) return 'personal'
+  const work     = (pikuSettings.get().workEmail     || CAL_WORK_EMAIL).toLowerCase()
+  const personal = (pikuSettings.get().personalEmail || CAL_PERSONAL_EMAIL).toLowerCase()
+  if (e === work) return 'work'
+  if (e === personal) return 'personal'
   return 'other'
 }
 
 export function CalendarScreen() {
+  const settings = useSettings()
   const [connecting, setConnecting] = useState(false)
   const [calAccts, setCalAccts] = useState<ServiceAccount[]>([])
   const [taggedEvents, setTaggedEvents] = useState<TaggedCalendarEvent[] | null>(null)
@@ -1123,18 +1282,18 @@ export function CalendarScreen() {
       <span className="flex-1" />
       {/* Email peek buttons — open Gmail for each account */}
       {hasWork && (
-        <button onClick={() => void openGmail(CAL_WORK_EMAIL)}
+        <button onClick={() => void openGmail(settings.workEmail)}
           className="font-hud text-[9.5px] uppercase tracking-wider px-2.5 py-1 transition-colors hover:brightness-125"
           style={{ ...chamfer(5), color: 'rgba(34,211,238,0.75)', boxShadow: 'inset 0 0 0 1px rgba(34,211,238,0.3)' }}
-          title={`Open Gmail for ${CAL_WORK_EMAIL}`}>
+          title={`Open Gmail for ${settings.workEmail}`}>
           work mail ↗
         </button>
       )}
       {hasPersonal && (
-        <button onClick={() => void openGmail(CAL_PERSONAL_EMAIL)}
+        <button onClick={() => void openGmail(settings.personalEmail)}
           className="font-hud text-[9.5px] uppercase tracking-wider px-2.5 py-1 transition-colors hover:brightness-125"
           style={{ ...chamfer(5), color: 'rgba(217,70,239,0.75)', boxShadow: 'inset 0 0 0 1px rgba(217,70,239,0.3)' }}
-          title={`Open Gmail for ${CAL_PERSONAL_EMAIL}`}>
+          title={`Open Gmail for ${settings.personalEmail}`}>
           personal mail ↗
         </button>
       )}
@@ -1238,28 +1397,38 @@ const MOCK_PEOPLE = [
   { n: 'Salescode team', r: 'Org context',            seen: 'this week' },
 ]
 export function PeopleScreen() {
-  const [realPeople, setRealPeople] = useState<{ name: string }[] | null>(null)
+  const [people, setPeople] = useState<{ id: string; name: string; rels: { rel: string; other: string }[] }[] | null>(null)
   const [loading, setLoading] = useState(true)
   useEffect(() => {
     let cancelled = false
     void (async () => {
       try {
-        const nodes = await graphService.getAllNodes()
-        if (!cancelled) setRealPeople(nodes.filter(n => n.type === 'person').map(n => ({ name: n.name })))
-      } catch { /* graph unavailable — realPeople stays null */ }
+        const [nodes, edges] = await Promise.all([graphService.getAllNodes(), graphService.getConfirmedEdges()])
+        if (cancelled) return
+        const nameById = new Map(nodes.map(n => [n.id, n.name]))
+        const persons = nodes.filter(n => n.type === 'person').map(n => ({
+          id: n.id,
+          name: n.name,
+          rels: edges
+            .filter(e => e.fromId === n.id || e.toId === n.id)
+            .map(e => ({ rel: e.relationship.replace(/_/g, ' '), other: nameById.get(e.fromId === n.id ? e.toId : e.fromId) ?? '—' }))
+            .slice(0, 6),
+        }))
+        setPeople(persons)
+      } catch { /* graph unavailable — people stays null → show samples */ }
       if (!cancelled) setLoading(false)
     })()
     return () => { cancelled = true }
   }, [])
-  const graphAvailable = realPeople !== null
+  const graphAvailable = people !== null
   return (
-    <ScreenShell title="People" subtitle="Person-entities Piku knows about, drawn from the World Model graph.">
+    <ScreenShell title="People" subtitle="Person-entities Piku knows about, with their relationships from the World Model graph.">
       <div className="grid grid-cols-12 gap-4">
         {loading ? (
           <div className="col-span-12 text-center py-8">
             <span className="font-hud text-[10px] uppercase tracking-[0.18em] text-white/30">Querying graph…</span>
           </div>
-        ) : graphAvailable && realPeople.length === 0 ? (
+        ) : graphAvailable && people.length === 0 ? (
           <div className="col-span-12">
             <HudPanel accent="amber">
               <div className="text-center py-4">
@@ -1269,8 +1438,8 @@ export function PeopleScreen() {
             </HudPanel>
           </div>
         ) : (
-          (graphAvailable ? realPeople : MOCK_PEOPLE.map(m => ({ name: m.n, r: m.r, seen: m.seen }))).map(p => (
-            <Card key={p.name} className="col-span-12 md:col-span-6 lg:col-span-4">
+          (graphAvailable ? people : MOCK_PEOPLE.map(m => ({ id: m.n, name: m.n, rels: [] as { rel: string; other: string }[], r: m.r, seen: m.seen }))).map(p => (
+            <Card key={p.id} className="col-span-12 md:col-span-6 lg:col-span-4">
               <div className="flex items-center gap-3">
                 <span className="w-10 h-10 rounded-full bg-cyan-400/15 border border-cyan-400/25 flex items-center justify-center text-cyan-200">◍</span>
                 <div className="flex-1 min-w-0"><div className="text-sm text-white/90 truncate">{p.name}</div>
@@ -1278,6 +1447,16 @@ export function PeopleScreen() {
                 </div>
                 {'seen' in p && <span className="text-[10px] text-white/30">{(p as { seen?: string }).seen}</span>}
               </div>
+              {p.rels.length > 0 && (
+                <div className="flex flex-col gap-1 mt-2.5 pt-2.5 border-t border-white/5">
+                  {p.rels.map((r, i) => (
+                    <div key={i} className="flex items-center gap-2 text-[11px]">
+                      <span className="font-hud text-[8.5px] uppercase tracking-wider text-cyan-300/50 shrink-0 w-20 truncate">{r.rel}</span>
+                      <span className="text-white/60 truncate">{r.other}</span>
+                    </div>
+                  ))}
+                </div>
+              )}
             </Card>
           ))
         )}
@@ -1467,8 +1646,40 @@ function ServiceCard({ service, title }: { service: ServiceType; title: string }
   )
 }
 
+// Editable text row — value + onChange are passed in so each setter targets a concrete settings
+// field (fully type-safe). Commits to pikuSettings on every keystroke (persisted + reactive).
+function SettingText({ label, value, onChange, placeholder }: { label: string; value: string; onChange: (v: string) => void; placeholder?: string }) {
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-white/5 last:border-0">
+      <span className="text-sm text-white/70 shrink-0">{label}</span>
+      <input value={value} onChange={e => onChange(e.target.value)} placeholder={placeholder}
+        className="flex-1 min-w-0 max-w-[62%] bg-white/5 border border-white/10 rounded px-2.5 py-1 text-xs text-white/80 placeholder:text-white/20 outline-none font-hud focus:border-cyan-400/35 transition-colors text-right" />
+    </div>
+  )
+}
+
+// Editable chat-model picker — lists locally-installed Ollama models (plus the current value so a
+// not-yet-pulled choice still shows). Writing it updates pikuSettings → OllamaService picks it up
+// on the next request (ACTIVE_BRAIN.model is a live getter).
+function ChatModelField() {
+  const s = useSettings()
+  const [models, setModels] = useState<string[]>([])
+  useEffect(() => { void ollamaService.listModels().then(setModels).catch(() => {}) }, [])
+  const options = Array.from(new Set([s.chatModel, ...models].filter(Boolean)))
+  return (
+    <div className="flex items-center justify-between gap-3 py-2.5 border-b border-white/5">
+      <span className="text-sm text-white/70">Chat model</span>
+      <select value={s.chatModel} onChange={e => pikuSettings.set({ chatModel: e.target.value })}
+        className="bg-white/5 border border-white/10 rounded px-2 py-1 text-xs text-cyan-100/90 outline-none font-hud focus:border-cyan-400/35 max-w-[62%]">
+        {options.map(m => <option key={m} value={m} className="bg-[#0a1120] text-white/85">{m}</option>)}
+      </select>
+    </div>
+  )
+}
+
 export function SettingsScreen() {
-  const [localOnly, setLocalOnly] = useState(!isOpencodeBrain())
+  const settings = useSettings()
+  const localOnly = !isOpencodeBrain()   // reactive via useSettings() above
   const Row = ({ label, value, tone = 'idle' }: { label: string; value: string; tone?: 'run' | 'idle' }) => (
     <div className="flex items-center justify-between py-2.5 border-b border-white/5 last:border-0">
       <span className="text-sm text-white/70">{label}</span>
@@ -1476,19 +1687,36 @@ export function SettingsScreen() {
     </div>
   )
   return (
-    <ScreenShell title="Settings" subtitle="Models, accounts, privacy — how Piku lives on your machine.">
+    <ScreenShell title="Settings" subtitle="Identity, models, privacy — all editable here and saved on your machine.">
       <div className="grid grid-cols-12 gap-4">
 
-        {/* Core settings */}
-        <Card title="Models" className="col-span-12 md:col-span-6">
-          <Row label="Chat model" value={ACTIVE_BRAIN.model} tone="run" />
-          <Row label="Embedding model" value="nomic-embed-text" />
-          <Row label="Tier-2 escalation" value="planned" />
+        {/* Profile — editable identity (drives greeting, persona, calendar tags, git identity) */}
+        <Card title="Profile" className="col-span-12 md:col-span-6">
+          <SettingText label="Your name"       value={settings.operatorName}   onChange={v => pikuSettings.set({ operatorName: v })}   placeholder="e.g. Akanksha" />
+          <SettingText label="Work email"      value={settings.workEmail}      onChange={v => pikuSettings.set({ workEmail: v })}      placeholder="you@company.com" />
+          <SettingText label="Personal email"  value={settings.personalEmail}  onChange={v => pikuSettings.set({ personalEmail: v })}  placeholder="you@gmail.com" />
+          <SettingText label="Work GitHub"     value={settings.workGitHub}     onChange={v => pikuSettings.set({ workGitHub: v })}     placeholder="work-username" />
+          <SettingText label="Personal GitHub" value={settings.personalGitHub} onChange={v => pikuSettings.set({ personalGitHub: v })} placeholder="personal-username" />
+          <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/25 mt-2 leading-relaxed">
+            Drives the Home greeting, Apps / Playground persona, Calendar tagging & the git-identity switch.
+          </div>
         </Card>
+
+        {/* Models — editable (embedding model stays pinned) */}
+        <Card title="Models" className="col-span-12 md:col-span-6">
+          <ChatModelField />
+          <SettingText label="opencode model" value={settings.opencodeModel} onChange={v => pikuSettings.set({ opencodeModel: v })} placeholder="deepseek-v4-flash-free" />
+          <Row label="Embedding model" value="nomic-embed-text · locked" />
+          <Row label="Tier-2 escalation" value="planned" />
+          <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/25 mt-2 leading-relaxed">
+            Embedding model is pinned — changing it would invalidate the vectors already in your graph.
+          </div>
+        </Card>
+
         <Card title="Privacy" className="col-span-12 md:col-span-6">
           <div className="flex items-center justify-between py-2.5 border-b border-white/5">
             <span className="text-sm text-white/70">Local-only (private)</span>
-            <button onClick={() => { const next = !localOnly; setLocalOnly(next); setOpencodeBrain(!next) }}
+            <button onClick={() => setOpencodeBrain(localOnly) /* on=localOnly → flips localOnly */}
               className="relative w-9 h-5 rounded-full transition-colors"
               style={{ background: localOnly ? 'rgba(34,211,238,0.3)' : 'rgba(255,255,255,0.1)', boxShadow: `inset 0 0 0 1px ${localOnly ? 'rgba(34,211,238,0.4)' : 'rgba(255,255,255,0.15)'}` }}>
               <span className="absolute top-0.5 left-0.5 w-4 h-4 rounded-full transition-transform"
@@ -1496,15 +1724,27 @@ export function SettingsScreen() {
             </button>
           </div>
           <Row label="Local Ollama" value="On-device · private" tone="run" />
-          <Row label="Opencode brain" value={localOnly ? 'Off (local-only)' : `Free cloud · ${OPENCODE_MODEL.modelID}`} tone={localOnly ? 'idle' : 'run'} />
+          <Row label="Opencode brain" value={localOnly ? 'Off (local-only)' : `Free cloud · ${settings.opencodeModel}`} tone={localOnly ? 'idle' : 'run'} />
           <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/30 mt-2 leading-relaxed">
             {localOnly ? 'All turns stay on your machine — fully private.' : 'Conversation routes to opencode\'s free cloud model (no API key). Data leaves the machine.'}
           </div>
         </Card>
+
         <Card title="Storage" className="col-span-12 md:col-span-6">
           <Row label="Database" value={`IndexedDB v${DB_VERSION}`} tone="run" />
           <Row label="Runtime vault" value="piku-vault/ (planned)" />
         </Card>
+
+        {/* Work links — editable; opened (signed-in) from the Work screen */}
+        <Card title="Work links" className="col-span-12 md:col-span-6">
+          <SettingText label="Jira URL"       value={settings.jiraUrl}       onChange={v => pikuSettings.set({ jiraUrl: v })}       placeholder="https://…atlassian.net" />
+          <SettingText label="Confluence URL" value={settings.confluenceUrl} onChange={v => pikuSettings.set({ confluenceUrl: v })} placeholder="https://…/wiki" />
+          <SettingText label="Notion URL"     value={settings.notionUrl}     onChange={v => pikuSettings.set({ notionUrl: v })}     placeholder="https://notion.so/…" />
+          <div className="font-hud text-[9.5px] uppercase tracking-[0.18em] text-white/25 mt-2 leading-relaxed">
+            Opened (already signed in) from the Work screen, in Piku's Chrome profile.
+          </div>
+        </Card>
+
         <Card title="Identity" className="col-span-12 md:col-span-6">
           <Row label="Personality source" value="hardcoded prompt" />
           <Row label="Personality-as-data (P7)" value="planned" />
@@ -1517,15 +1757,24 @@ export function SettingsScreen() {
         <WebAppCard app="linkedin" name="LinkedIn" desc="Opens LinkedIn in a dedicated window — log in once, stays signed in." />
 
       </div>
+
+      <div className="mt-4 flex justify-end">
+        <button onClick={() => { if (window.confirm('Reset all Piku settings to defaults?')) pikuSettings.reset() }}
+          className="font-hud text-[10px] uppercase tracking-[0.15em] text-white/40 hover:text-amber-300/80 border border-white/10 hover:border-amber-400/30 px-3 py-1.5 transition-colors"
+          style={{ ...chamfer(6) }}>
+          Reset settings to defaults
+        </button>
+      </div>
+
       <HudPanel label="Build status" code="06" className="mt-6">
         <div className="flex flex-wrap gap-1.5">
           {([
             { label: 'OllamaService config', state: 'built' as const },
             { label: 'Multi-account service', state: 'built' as const },
             { label: 'GitHub connector', state: 'built' as const },
+            { label: 'Editable settings — persisted (pikuSettings)', state: 'built' as const },
+            { label: 'Identity / models / privacy — UI-editable', state: 'built' as const },
             { label: 'Email / WhatsApp connectors', state: 'planned' as const },
-            { label: 'Settings persistence', state: 'planned' as const },
-            { label: 'Identity Layer (pikuIdentity v8)', state: 'planned' as const },
           ] as const).map(it => (
             <span key={it.label}
               className={`font-hud text-[9.5px] px-2.5 py-1 tracking-[0.12em] uppercase border ${

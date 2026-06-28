@@ -10,16 +10,17 @@ import { toolRouter }                    from '../../../services/ToolRouter'
 import { classifyIntent }                from '../../../services/ReasoningPlanner'
 import { detectMode, assembleMode, handoffToExternal } from '../../../services/modes/Modes'
 import { opencodeProvider }              from '../../../services/OpencodeProvider'
+import { pikuSettings }                  from '../../../services/settings'
 import { agentHub }                      from '../../os/screens/agentSession'
 import { logger }                        from '../../../lib/logger'
 import { PIKU_PERSONA }                  from '../../../lib/persona'
 
 // opencode is Piku's deep-thinking brain (free, capable models). On by default; conversation +
-// reasoning route to it, falling back to local Ollama if the server can't be reached. Toggle-able
-// for a fully-local/private session later (the owner will swap in a self-hosted model).
-let opencodeBrain = true
-export const setOpencodeBrain = (on: boolean) => { opencodeBrain = on }
-export const isOpencodeBrain  = () => opencodeBrain
+// reasoning route to it, falling back to local Ollama if the server can't be reached. The on/off
+// state is the persisted `localOnly` setting (Settings → Privacy), so a fully-local/private
+// session survives restarts and is honoured everywhere isOpencodeBrain() is checked.
+export const setOpencodeBrain = (on: boolean) => pikuSettings.set({ localOnly: !on })
+export const isOpencodeBrain  = () => !pikuSettings.get().localOnly
 
 // Module-level singletons — one instance per app lifetime
 const memoryService     = new MemoryService()
@@ -127,7 +128,7 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
         return reply || '(done)'
       }
       const brainPath = async (system: string): Promise<string> => {
-        if (opencodeBrain) {
+        if (isOpencodeBrain()) {
           try {
             if (await opencodeProvider.ensureServer()) {
               setPresenceState('thinking')
@@ -197,7 +198,7 @@ export function useChat({ addMessage, setPresenceState, setInputText, updateLast
 
     } catch (err) {
       logger.error('sendMessage failed', { error: String(err) })
-      const errMsg = "I can't reach Ollama right now. Make sure it's running: ollama serve"
+      const errMsg = "Something went wrong with that turn. If replies stop coming through, check that Ollama is running (ollama serve) — and opencode too, if you're using the cloud brain."
       if (streamingPlaceholderAdded) {
         updateLastPikuMessage(errMsg)
       } else {

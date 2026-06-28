@@ -292,7 +292,7 @@ export function AutomationsScreen({ onNavigate }: { onNavigate?: (v: NavKey) => 
       </HudPanel>
 
       <BuildStatus items={[
-        { label: '13 real tools — open_app / open_link / open_web / open_email / list_files / gmail_check / calendar_check / github_commits_today / github_list_repos / github_recent_activity / web_search / save_memory / recall_memory / get_datetime', state: 'built' },
+        { label: '14 real tools — open_app / open_link / open_web / open_email / list_files / gmail_check / calendar_check / github_commits_today / github_list_repos / github_recent_activity / web_search / save_memory / recall_memory / get_datetime', state: 'built' },
         { label: 'Custom automations — add / delete / persist to localStorage', state: 'built' },
         { label: 'Run → seeds Agent session + navigates', state: 'built' },
         { label: 'Trigger phrase → ambient intent matching', state: 'planned' },

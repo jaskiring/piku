@@ -1,4 +1,5 @@
 import { accountService } from './AccountService'
+import { pikuSettings } from '../settings'
 
 // Seed the user's GitHub accounts on boot. Tokens come from .env.local (VITE_GH_*), which is
 // gitignored — they never enter the repo. This upserts: it creates the account if missing AND
@@ -10,8 +11,11 @@ const SEEDS: { label: string; username: string; token?: string }[] = [
 ]
 
 export async function seedAccounts(): Promise<void> {
+  // Usernames come live from Settings → Profile; the SEEDS env values remain the defaults.
+  const s = pikuSettings.get()
+  const seeds = SEEDS.map(seed => ({ ...seed, username: seed.label === 'Personal' ? s.personalGitHub : s.workGitHub }))
   const existing = await accountService.getByService('github')
-  for (const seed of SEEDS) {
+  for (const seed of seeds) {
     const current = existing.find(a => a.label.toLowerCase() === seed.label.toLowerCase())
     if (!current) {
       await accountService.create('github', seed.label, seed.token ?? '', { username: seed.username })
